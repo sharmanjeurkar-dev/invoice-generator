@@ -1,12 +1,19 @@
 import json
+import os
+import sys
 
 from llama_cpp import Llama
+
+current_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.abspath(os.path.join(current_dir, ".."))
+sys.path.insert(0, project_root)
+from src.document.Pdf_generator import generate_invoice_pdf
 
 llma = Llama(
     model_path="./models/gemma-2-9b-it-Q5_K_M.gguf",
     n_ctx=8192,
     n_batch=2048,
-    flash_attn=True,
+    flash_attn=True,  # efficient memory and attention management
     n_gpu_layers=-1,
     verbose=False,
 )
@@ -25,9 +32,6 @@ with open(system_promt_file_path, "r", encoding="utf-8") as f:
 
 query = (
     r"Generate invoice for Autobahn Trucking Corporation of ₹45000 for Legal Opinion. "
-    "Address - Autobanh Trucking Corporation Pvt. Ltd	23 & 24,  "
-    "Shree Ambika Heritage, Plot No 1, Sector 1,  "
-    "Kharghar Navi Mumbai,  410210"
 )
 formatted_prompt = (
     f"<start_of_turn>user\n{system_instruction}\n\n{query}<end_of_turn>\n"
@@ -61,6 +65,9 @@ while True:
                 "🟢 STATUS: [GENERATION MODE] - Final Invoice JSON Generated Successfully:\n"
             )
             print(json.dumps(parsed_json, indent=2))
+
+            print("\n🖌️  Passing data to ReportLab...")
+            generate_invoice_pdf(parsed_json)
             break
         else:
             raise json.JSONDecodeError(

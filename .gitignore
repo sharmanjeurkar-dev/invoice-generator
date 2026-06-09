@@ -1,2 +1,4 @@
 /models
 /venv
+/src/document/__pycache__
+invoice_output.pdf
