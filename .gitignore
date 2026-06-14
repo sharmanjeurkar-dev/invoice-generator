@@ -2,3 +2,5 @@
 /venv
 /src/document/__pycache__
 invoice_output.pdf
+templates/Template raw .numbers
+.DS_Store
