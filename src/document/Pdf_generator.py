@@ -1,105 +1,66 @@
+import base64
 import os
-from datetime import date
+from datetime import datetime, timedelta
 
-from reportlab.lib import colors
-from reportlab.lib.pagesizes import A4
-from reportlab.lib.styles import getSampleStyleSheet
-from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from jinja2 import Environment, FileSystemLoader
+
+# Import the modern Playwright engine instead of WeasyPrint
+from playwright.sync_api import sync_playwright
 
 
 def generate_invoice_pdf(invoice_data, output_filename="invoice_output.pdf"):
+    due_duration = 22
+    today = datetime.now()
+    due_date = today + timedelta(due_duration)
+    today = today.strftime("%d/%m/%Y")
+    due_date = due_date.strftime("%d/%m/%Y")
+    invoice_data["invoice_number"] = invoice_data.get("invoice_number") or "AUT-001"
+    invoice_data["invoice_date"] = invoice_data.get("invoice_date") or today
+    invoice_data["due_date"] = invoice_data.get("due_date") or due_date
 
-    pdf = SimpleDocTemplate(
-        output_filename,
-        pagesize=A4,
-        rightMargin=40,
-        leftMargin=40,
-        topMargin=40,
-        bottomMargin=40,
-    )
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.abspath(os.path.join(current_dir, "..", ".."))
+    template_dir = os.path.join(project_root, "templates")
 
-    styles = getSampleStyleSheet()
-    elements = []
+    logo_path = os.path.join(template_dir, "logo.png")
+    if os.path.exists(logo_path):
+        with open(logo_path, "rb") as f:
+            logo_b64 = base64.b64encode(f.read()).decode("utf-8")
+        invoice_data["logo_data"] = f"data:image/png;base64,{logo_b64}"
+    else:
+        invoice_data["logo_data"] = ""
 
-    inv_number = invoice_data.get("invoice_number") or "AUTO-1042"
-    inv_date = invoice_data.get("invoice_date") or date.today()
+    env = Environment(loader=FileSystemLoader(template_dir))
+    template = env.get_template("invoice.html")
 
-    header_data = [
-        [
-            Paragraph("<b>TAX INVOICE</b>", styles["Heading1"]),
-            Paragraph(
-                f"<b>Invoice #:</b> {inv_number}<br/><b>Date:</b> {inv_date}",
-                styles["Normal"],
-            ),
-        ]
-    ]
-    header_table = Table(header_data, colWidths=[300, 200])
-    header_table.setStyle(
-        TableStyle(
-            [
-                ("ALIGN", (1, 0), (1, 0), "RIGHT"),
-                ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 20),
-            ]
-        )
-    )
-    elements.append(header_table)
-    elements.append(Spacer(1, 20))
+    rendered_html = template.render(**invoice_data)
+    output_path = os.path.join(project_root, output_filename)
 
-    client = invoice_data.get("client", {})
-    address = client.get("address", {})
+    print("🌐 Spinning up headless browser...")
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page()
 
-    address_lines = [f"<b>{client.get('name', 'Client Name')}</b>"]
-    for key in ["line1", "line2", "line3"]:
-        if address.get(key):
-            address_lines.append(address.get(key))
+        page.set_content(rendered_html)
 
-    client_info = "<br/>".join(address_lines)
-
-    elements.append(Paragraph("<b>Billed To:</b>", styles["Normal"]))
-    elements.append(Paragraph(client_info, styles["Normal"]))
-    elements.append(Spacer(1, 30))
-
-    table_data = [["Service Category", "Details", "Qty", "Amount (₹)"]]  # Header Row
-
-    for service in invoice_data.get("services", []):
-        table_data.append(
-            [
-                service.get("category", ""),
-                Paragraph(service.get("details", ""), styles["Normal"]),
-                str(service.get("qty", 1)),
-                f"{service.get('amount', 0):,.2f}",
-            ]
+        page.pdf(
+            path=output_path,
+            format="A4",
+            print_background=True,
+            margin={"top": "40px", "right": "40px", "bottom": "40px", "left": "40px"},
         )
 
-    table_data.append(["", "", "Subtotal:", f"{invoice_data.get('subtotal', 0):,.2f}"])
-    table_data.append(
-        [
-            "",
-            "",
-            f"GST ({(invoice_data.get('gst', 0) * 100):.0f}%):",
-            f"{(invoice_data.get('subtotal', 0) * invoice_data.get('gst', 0)):,.2f}",
-        ]
-    )
-    table_data.append(["", "", "TOTAL:", f"{invoice_data.get('total', 0):,.2f}"])
+        browser.close()
 
-    service_table = Table(table_data, colWidths=[130, 220, 50, 100])
-    service_table.setStyle(
-        TableStyle(
-            [
-                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#2C3E50")),
-                ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
-                ("ALIGN", (0, 0), (-1, -1), "LEFT"),
-                ("ALIGN", (2, 0), (-1, -1), "RIGHT"),
-                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-                ("BOTTOMPADDING", (0, 0), (-1, 0), 12),
-                ("GRID", (0, 0), (-1, -4), 1, colors.lightgrey),
-                ("LINEABOVE", (2, -3), (-1, -1), 1, colors.black),
-                ("FONTNAME", (2, -1), (-1, -1), "Helvetica-Bold"),
-            ]
-        )
-    )
-    elements.append(service_table)
+    print(f"📄 Modern CSS PDF generated at: {output_path}")
 
-    pdf.build(elements)
-    print(f"📄 PDF successfully generated: {os.path.abspath(output_filename)}")
+
+if __name__ == "__main__":
+    test_data = {
+        "client": {"name": "Test Client"},
+        "services": [{"details": "Test Service", "amount": 1000}],
+        "subtotal": 1000,
+        "gst": 0.18,
+        "total": 1180,
+    }
+    generate_invoice_pdf(test_data, "playwright_test.pdf")

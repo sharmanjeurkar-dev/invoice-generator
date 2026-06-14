@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Invoice #AUT11526</title>
+<style>
+  body {
+    font-family: Calibri, Arial, sans-serif;
+    background: #e9e9e9;
+  }
+  .pagewrap {
+    width: 794px;
+    margin: 20px auto;
+    background: #ffffff;
+    border: 2px solid #000000;
+  }
+  .blue { color: #1f3864; }
+  .red { color: #c0392b; }
+  .companyname { font-size: 19px; font-weight: bold; }
+  .formerly { font-size: 11px; font-weight: bold; }
+  .addr { font-size: 12px; font-style: italic; line-height: 1.35; }
+  .reg { font-size: 12px; line-height: 1.4; }
+  .invoice-col {
+    writing-mode: vertical-rl;
+    transform: rotate(180deg);
+    white-space: nowrap;
+  }
+  .invoiceword {
+    font-size: 26px;
+    letter-spacing: 4px;
+    color: #b9bbbe;
+    display: inline-block;
+    margin-right: 15px;
+  }
+  .invoicenum {
+    font-size: 26px;
+    letter-spacing: 1px;
+    color: #c0392b;
+    font-weight: bold;
+    display: inline-block;
+  }
+  table.items th {
+    background-color: #1f3864;
+    color: #ffffff;
+    font-weight: bold;
+    text-align: center;
+    font-size: 12px;
+    padding: 8px 6px;
+    border: 1px solid #1f3864;
+  }
+  table.items td {
+    border: 1px solid #000000;
+    padding: 4px 8px;
+    vertical-align: top;
+    color: #1f3864;
+    font-size: 12px;
+  }
+  .subtotal-label {
+    text-align: right;
+    font-weight: bold;
+    background-color: #d9d9d9;
+    color: #1f3864;
+  }
+  .billto-label { font-size: 12px; font-weight: bold; }
+  .paymentmode {
+    background-color: #d9d9d9;
+    color: #c0392b;
+    font-weight: bold;
+    text-align: center;
+    font-size: 12px;
+    padding: 6px 0;
+  }
+  .bankdetails { font-size: 12px; line-height: 1.7; padding: 8px 12px; }
+</style>
+</head>
+<body>
+
+<table class="pagewrap" cellpadding="0" cellspacing="0" border="0">
+  <tr>
+    <td colspan="3" align="center" style="padding:15px 0;">
+      {% if logo_data %}<img src="{{ logo_data }}" alt="Logo" style="max-height:60px;">{% endif %}
+    </td>
+  </tr>
+  <tr>
+    <!-- Left vertical INVOICE / number column -->
+    <td width="13" valign="middle" align="center" class="invoice-col" style="border-right:1px solid #000000;" rowspan="6">
+      <span class="invoiceword">INVOICE</span>
+      <span class="invoicenum">#{{ invoice_number }}</span>
+    </td>
+
+    <!-- Top right area: company box + date box -->
+    <td colspan="2" style="padding:15px 20px 10px 14px;">
+      <table cellpadding="0" cellspacing="0" border="0" width="100%">
+        <tr>
+          <td width="430" valign="top" style="border:1px solid #000000; padding:6px 10px;">
+            <div class="companyname blue">Pentacles Legal Partenrs LLP</div>
+            <div class="formerly blue">(Formerly known as AKPD Legal Partners LLP)</div>
+            <div class="addr blue">
+              #806, BramhaCorp Vantage Tower, Block C,<br>
+              Bavdhan, Pune 411021<br>
+              91 9130024827 | legal@pentacleslegal.com
+            </div>
+            <div class="reg blue">
+              LLPIN: ACA-2411<br>
+              PAN: ACBFA3255C
+            </div>
+          </td>
+          <td width="20"></td>
+          <td width="180" valign="top" style="border:1px solid #000000;">
+            <table cellpadding="0" cellspacing="0" border="0" width="100%">
+              <tr><td style="padding:8px 0 8px 10px; font-size:13px; font-weight:bold; text-align:left;" class="blue">Invoice Date: {{ invoice_date }}</td></tr>
+              <tr><td style="padding:0 0 8px 10px; font-size:13px; font-weight:bold; text-align:left;" class="blue">Due Date: {{ due_date }}</td></tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+
+  <tr>
+    <!-- BILL TO box -->
+    <td colspan="2" style="padding:0 20px 0 14px;">
+      <table cellpadding="0" cellspacing="0" border="0" width="100%">
+        <tr>
+          <td width="430" height="120" valign="top" style="border:1px solid #000000; padding:6px 10px;">
+            <span class="billto-label red">BILL TO</span><br><br>
+            <span class="blue" style="font-size:12px;">
+              {{ client.name }}<br>
+              {% if client.address %}{{ client.address.line1 }}<br>{{ client.address.line2 }}, {{ client.address.line3 }}<br>{% endif %}
+              {% if client.email %}{{ client.email }}<br>{% endif %}
+              {% if client.phone %}{{ client.phone }}{% endif %}
+            </span>
+          </td>
+          <td></td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+
+  <tr>
+    <!-- spacer to shift table down -->
+    <td colspan="2" height="20"></td>
+  </tr>
+
+  <tr>
+    <!-- Items table -->
+    <td colspan="2" style="padding:0 24px 0 14px;">
+      <table class="items" cellpadding="0" cellspacing="0" border="0" width="100%">
+        <tr>
+          <th width="46%">DESCRIPTION</th>
+          <th width="9%">QTY</th>
+          <th width="30%">Details</th>
+          <th width="11%">TOTAL</th>
+        </tr>
+        {% for service in services %}
+        <tr>
+          {% if loop.first %}
+          <td align="center" valign="middle" rowspan="{{ services|length }}">{{ description | default('Legal Professional Fees') }}</td>
+          {% endif %}
+          <td align="center" valign="middle">{{ service.qty | default(1) }}</td>
+          <td>{{ service.details }}</td>
+          <td align="right">{{ "%.2f"|format(service.amount) }}</td>
+        </tr>
+        {% endfor %}
+        <tr>
+          <td style="border:none;"></td>
+          <td style="border:none;"></td>
+          <td class="subtotal-label">SUBTOTAL</td>
+          <td align="right">{{ "%.2f"|format(subtotal) }}</td>
+        </tr>
+        {% if gst %}
+        <tr>
+          <td style="border:none;"></td>
+          <td style="border:none;"></td>
+          <td class="subtotal-label">GST ({{ (gst * 100) | round(0) | int }}%)</td>
+          <td align="right">{{ "%.2f"|format(subtotal * gst) }}</td>
+        </tr>
+        {% endif %}
+        <tr>
+          <td style="border:none;"></td>
+          <td style="border:none;"></td>
+          <td class="subtotal-label">TOTAL</td>
+          <td align="right">{{ "%.2f"|format(total) }}</td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+
+  <tr>
+    <!-- Thank you line -->
+    <td colspan="2" style="padding:0 24px 0 14px;">
+      <table cellpadding="0" cellspacing="0" border="0" width="100%">
+        <tr><td style="border-bottom:1px solid #000000; padding:8px 10px; font-size:12px;">Thank you for your business!</td></tr>
+      </table>
+    </td>
+  </tr>
+
+  <tr>
+    <!-- Bank details + signature -->
+    <td colspan="2" style="padding:15px 20px 25px 6px;">
+      <table cellpadding="0" cellspacing="0" border="0" width="100%">
+        <tr>
+          <td width="430" valign="top" style="border:1px solid #000000;">
+            <div class="paymentmode">Mode of Payment : Bank Transfer/ UPI/ GPAY</div>
+            <div class="bankdetails blue">
+              AKPD LEGAL PARTNERS LLP<br>
+              Current a/c no: 10132560832<br>
+              IFSC Code: IDFB0041355<br>
+              Bank: IDFC First Bank<br>
+              Branch: Aundh, Pune, Maharashtra
+            </div>
+          </td>
+          <td valign="bottom" align="right" style="font-size:13px; font-weight:bold; padding-right:40px;" class="blue">
+            For Pentacles Legal Partners LLP
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+
+  <tr>
+    <!-- Footer -->
+    <td colspan="3" align="center" style="padding:15px 0; font-size:12px; border-top:1px solid #000000;">
+      This is a Computer Generated Invoice
+    </td>
+  </tr>
+</table>
+
+</body>
+</html>
