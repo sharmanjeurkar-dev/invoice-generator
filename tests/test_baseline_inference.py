@@ -30,7 +30,7 @@ with open(system_promt_file_path, "r", encoding="utf-8") as f:
 #     "Shree Ambika Heritage, Plot No 1, Sector 1, "
 #     "Kharghar Navi Mumbai,Mumbai 410210 "
 
-query = r"Generate invoice for Autobahn Trucking Corporation of ₹30000 for Legal Opinion and for Document Verifaction ₹20000. "
+query = r"Generate invoice of ₹30000 for Legal Opinion and for Document Verifaction ₹20000. Address:  23 and 24 Shree ambika heritage, Plot no 1, Sector 1, Khargar, Navi Mumbai, Mumbai 4102101 "
 formatted_prompt = (
     f"<start_of_turn>user\n{system_instruction}\n\n{query}<end_of_turn>\n"
     f"<start_of_turn>model\n"
