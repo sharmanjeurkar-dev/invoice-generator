@@ -4,3 +4,7 @@
 invoice_output.pdf
 templates/Template raw .numbers
 .DS_Store
+.env
+src/ui/node_modules/
+src/ui/.next/
+src/api/__pycache__/
