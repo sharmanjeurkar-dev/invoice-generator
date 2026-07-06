@@ -25,19 +25,14 @@ system_promt_file_path = (
 with open(system_promt_file_path, "r", encoding="utf-8") as f:
     system_instruction = f.read().strip()
 
-# r"Generate invoice for Autobahn Trucking Corporation of ₹45000 for Legal Due Diligance,Document Verification, and Legal Opinion. "
-#     "Address:Autobanh Trucking Corporation Pvt. Ltd	23 & 24,"
-#     "Shree Ambika Heritage, Plot No 1, Sector 1, "
-#     "Kharghar Navi Mumbai,Mumbai 410210 "
 
-query = r"Generate invoice of ₹30000 for Legal Opinion and for Document Verifaction ₹20000. Address:  23 and 24 Shree ambika heritage, Plot no 1, Sector 1, Khargar, Navi Mumbai, Mumbai 4102101 "
-formatted_prompt = (
-    f"<start_of_turn>user\n{system_instruction}\n\n{query}<end_of_turn>\n"
-    f"<start_of_turn>model\n"
-)
-conversation_history = f"{formatted_prompt}"
+def generate_json_for_inbvoice_from_prompt(query: str) -> dict:
+    formatted_prompt = (
+        f"<start_of_turn>user\n{system_instruction}\n\n{query}<end_of_turn>\n"
+        f"<start_of_turn>model\n"
+    )
+    conversation_history = f"{formatted_prompt}"
 
-while True:
     output = llma(
         prompt=conversation_history,
         max_tokens=5000,
@@ -45,42 +40,37 @@ while True:
         echo=False,
     )
     raw_response = output["choices"][0]["text"].strip()
+    print(f"\n--- RAW AI RESPONSE ---\n{raw_response}\n-----------------------\n")
+    if "```json" in raw_response:
+        raw_response = raw_response.split("```json")[1]
+    if "```" in raw_response:
+        raw_response = raw_response.split("```")[0]
     conversation_history += f"{raw_response} <end_of_turn>\n"
     print("\n" + "=" * 50)
     print("               AGENT OUTPUT")
     print("=" * 50 + "\n")
 
-    try:
-        # Find the first '{' and the last '}' in the text
-        start_idx = raw_response.find("{")
-        end_idx = raw_response.rfind("}")
+    # Find the first '{' and the last '}' in the text
+    start_idx = raw_response.find("{")
+    end_idx = raw_response.rfind("}")
 
-        if start_idx != -1 and end_idx != -1:
-            # Extract ONLY the JSON part
-            cleaned_response = raw_response[start_idx : end_idx + 1]
-            parsed_json = json.loads(cleaned_response, strict=False)
-            print(
-                "🟢 STATUS: [GENERATION MODE] - Final Invoice JSON Generated Successfully:\n"
-            )
-            print(json.dumps(parsed_json, indent=2))
-
-            print("\n🖌️  Passing data to ReportLab...")
-            generate_invoice_pdf(parsed_json)
-            break
-        else:
-            raise json.JSONDecodeError(
-                "No proper json format found to decode", raw_response, 0
-            )
-
-    except json.JSONDecodeError:
-        print("🟡 STATUS: [CLARIFICATION MODE] - Missing Information Detected:\n")
-        print("┌────────────────────────────────────────────────────────┐")
-        for line in raw_response.splitlines():
-            print(f"{line.strip():<52}. |")
-        print("└────────────────────────────────────────────────────────┘")
-
-        ans = input("User: ")
-        conversation_history += (
-            f"<start_of_turn>user\n {ans}<end_of_turn>\n\n<start_of_turn>model\n"
+    if start_idx != -1 and end_idx != -1:
+        # Extract ONLY the JSON part
+        cleaned_response = raw_response[start_idx : end_idx + 1]
+        parsed_json = json.loads(cleaned_response, strict=False)
+        print(
+            "🟢 STATUS: [GENERATION MODE] - Final Invoice JSON Generated Successfully:\n"
         )
-    print("\n" + "=" * 50)
+        return {"status": "success", "data": parsed_json}
+    else:
+        return {"status": "clarification", "message": raw_response}
+
+
+print("\n" + "=" * 50)
+
+
+def text_to_json(text: str, key: str = "Prompt"):
+    return json.dumps([key, text], separators=(",", ":"))
+
+
+# prompt: Generate invoice for Ram of ₹30000 for Legal Opinion and for Document Verifaction ₹20000. Address:  23 and 24 Shree ambika heritage, Plot no 1, Sector 1, Khargar, Navi Mumbai, Mumbai 4102101
