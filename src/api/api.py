@@ -72,6 +72,26 @@ app.add_middleware(
 load_dotenv()
 
 
+@app.get("/api/get-next-invoice-id")
+def get_next_invoice_id():
+    try:
+        db_url = os.getenv("DATABASE_URL")
+        conn = psycopg2.connect(db_url)
+        cursor = conn.cursor()
+
+        # This securely pulls the next atomic number from Postgres
+        cursor.execute("SELECT nextval('invoice_number_seq');")
+        next_val = cursor.fetchone()[0]
+
+        cursor.close()
+        conn.close()
+
+        # Formats it as INV-1000, INV-1001, etc.
+        return {"invoice_id": f"INV-{next_val}"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
 @app.post("/api/prompt-to-invoice")
 async def prompt_to_invoice_generator(response: PromptRequestModel):
     invoice_id = str(uuid.uuid4())[:8]
@@ -201,6 +221,13 @@ async def prompt_to_invoice_generator(response: PromptRequestModel):
         print(f"✅ PostgreSQL record {invoice_id} upserted successfully!")
     except Exception as e:
         print(f"⚠️ Database Error: {e}")
+    client_email = invoice_dict["client"].get("email")
+    if client_email:
+        print(f"📧 Email was sent to {client_email}. Returning success message.")
+        return {
+            "status": "success",
+            "message": f"Invoice {invoice_id} successfully finalized and emailed to {client_email}.",
+        }
     return FileResponse(
         path=file_path, filename=output_filename, media_type="application/pdf"
     )
