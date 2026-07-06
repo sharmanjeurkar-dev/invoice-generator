@@ -8,3 +8,4 @@ templates/Template raw .numbers
 src/ui/node_modules/
 src/ui/.next/
 src/api/__pycache__/
+/tests/__pycache__

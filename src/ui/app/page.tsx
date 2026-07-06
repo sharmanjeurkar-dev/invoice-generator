@@ -11,7 +11,6 @@ import {
   Sparkles,
 } from "lucide-react";
 
-// ── Types ──────────────────────────────────────────────────────────────────
 type Role = "user" | "ai";
 
 interface Message {
@@ -24,9 +23,14 @@ interface Message {
 
 type Status = "idle" | "thinking" | "rendering" | "success" | "error";
 
-// ── Helpers ────────────────────────────────────────────────────────────────
-function buildPromptPayload(messages: Message[], latestUserText: string): string {
-  if (messages.length === 0) return latestUserText;
+function generateInvoiceId() {
+  return `INV-${Math.floor(1000 + Math.random() * 9000)}`; 
+}
+
+function buildPromptPayload(messages: Message[], latestUserText: string, sessionId: string): string {
+  const systemNote = `\n\n[SYSTEM NOTE: The strict invoice_number for this session is ${sessionId}. You MUST use this exact ID in your JSON.]`;
+  
+  if (messages.length === 0) return latestUserText + systemNote;
 
   const history = messages
     .map((m) =>
@@ -34,21 +38,31 @@ function buildPromptPayload(messages: Message[], latestUserText: string): string
     )
     .join("\n");
 
-  return history + `\nUser answered: ${latestUserText}`;
+  return history + `\nUser answered: ${latestUserText}` + systemNote;
 }
 
 function uid() {
   return Math.random().toString(36).slice(2, 9);
 }
 
-// ── Component ──────────────────────────────────────────────────────────────
 export default function InvoiceGeneratorPage() {
+  const fetchNewInvoiceId = async () => {
+    try {
+      const res = await fetch("http://127.0.0.1:8000/api/get-next-invoice-id");
+      const data = await res.json();
+      if (data.invoice_id) {
+        setSessionInvoiceId(data.invoice_id);
+      }
+    } catch (err) {
+      console.error("Failed to fetch ID", err);
+    }
+  };
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [status, setStatus] = useState<Status>("idle");
   const [errorMessage, setErrorMessage] = useState("");
   const [successFile, setSuccessFile] = useState("");
-
+  const [sessionInvoiceId, setSessionInvoiceId] = useState("");
   const chatBottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const isLoading = status === "thinking" || status === "rendering";
@@ -64,7 +78,7 @@ export default function InvoiceGeneratorPage() {
   const handleSend = async () => {
     const text = input.trim();
     if (!text || isLoading) return;
-
+    
     const userMsg: Message = { id: uid(), role: "user", text };
     const previousMessages = [...messages];
     setMessages((prev) => [...prev, userMsg]);
@@ -73,10 +87,9 @@ export default function InvoiceGeneratorPage() {
     setSuccessFile("");
     setStatus("thinking");
 
-    // Reset textarea height
     if (inputRef.current) inputRef.current.style.height = "44px";
 
-    const promptPayload = buildPromptPayload(previousMessages, text);
+    const promptPayload = buildPromptPayload(previousMessages, text, sessionInvoiceId);;
 
     try {
       const response = await fetch(
@@ -99,28 +112,30 @@ export default function InvoiceGeneratorPage() {
 
       const contentType = response.headers.get("Content-Type") ?? "";
 
-      // ── TYPE A: Clarification (JSON) ───────────────────────────────────
       if (contentType.includes("application/json")) {
         const data = await response.json();
-        const aiMsg: Message = {
-          id: uid(),
-          role: "ai",
-          text: data.message ?? "Could you clarify a few details?",
-        };
-        setMessages((prev) => [...prev, aiMsg]);
-        setStatus("idle");
-        setTimeout(() => inputRef.current?.focus(), 50);
+        
+        if (data.status === "success") {
+          setStatus("success");
+          setSuccessFile(data.message);
+        } else {
+          const aiMsg: Message = {
+            id: uid(),
+            role: "ai",
+            text: data.message ?? "Could you clarify a few details?",
+          };
+          setMessages((prev) => [...prev, aiMsg]);
+          setStatus("idle");
+          setTimeout(() => inputRef.current?.focus(), 50);
+        }
 
-      // ── TYPE B: PDF Download ───────────────────────────────────────────
       } else if (contentType.includes("application/pdf")) {
-        // Read the secret note from FastAPI's headers!
         const emailSentTo = response.headers.get("X-Email-Status");
         
         const blob = await response.blob();
         const url = URL.createObjectURL(blob);
         const filename = `invoice_${Date.now()}.pdf`;
         
-        // Dynamically change the text based on whether an email was sent
         let finalMessage = "I have successfully generated your invoice! You can download it below.";
         if (emailSentTo) {
           finalMessage = `I have successfully generated your invoice! A copy has also been securely emailed to ${emailSentTo}. You can download your local copy below.`;
@@ -136,7 +151,6 @@ export default function InvoiceGeneratorPage() {
         
         setMessages((prev) => [...prev, aiMsg]);
         setStatus("idle");
-
       } else {
         throw new Error(`Unexpected Content-Type: ${contentType}`);
       }
@@ -155,19 +169,23 @@ export default function InvoiceGeneratorPage() {
     }
   };
 
+ useEffect(() => {
+    inputRef.current?.focus();
+    fetchNewInvoiceId();
+  }, []);
+
   const handleReset = () => {
     setMessages([]);
     setInput("");
     setStatus("idle");
     setErrorMessage("");
     setSuccessFile("");
+    fetchNewInvoiceId(); // <--- Grabs the NEXT sequence number for the new chat
     setTimeout(() => inputRef.current?.focus(), 50);
   };
 
   return (
     <main className="min-h-screen bg-[#F7F7F5] flex flex-col items-center justify-center px-4 py-10 font-sans">
-
-      {/* ── Header ── */}
       <div className="mb-6 text-center">
         <div className="inline-flex items-center gap-2 mb-2">
           <Scale className="w-5 h-5 text-[#1f3864]" strokeWidth={1.5} />
@@ -183,13 +201,8 @@ export default function InvoiceGeneratorPage() {
         </p>
       </div>
 
-      {/* ── Main Card ── */}
       <div className="w-full max-w-2xl bg-white border border-[#e5e7eb] rounded-2xl shadow-sm flex flex-col overflow-hidden">
-
-        {/* ── Chat Area ── */}
         <div className="overflow-y-auto px-5 py-5 space-y-4 min-h-[360px] max-h-[480px]">
-
-          {/* Empty state */}
           {messages.length === 0 && !isLoading && status !== "error" && (
             <div className="h-full flex flex-col items-center justify-center text-center py-10 gap-3">
               <div className="w-12 h-12 rounded-full bg-[#1f3864]/10 flex items-center justify-center">
@@ -218,7 +231,6 @@ export default function InvoiceGeneratorPage() {
             </div>
           )}
 
-          {/* Messages */}
           {messages.map((msg) => (
             <div
               key={msg.id}
@@ -254,7 +266,6 @@ export default function InvoiceGeneratorPage() {
             </div>
           ))}
 
-          {/* AI thinking indicator */}
           {isLoading && (
             <div className="flex justify-start">
               <div className="w-6 h-6 rounded-full bg-[#1f3864]/10 flex items-center justify-center mr-2 mt-0.5 shrink-0">
@@ -269,7 +280,6 @@ export default function InvoiceGeneratorPage() {
             </div>
           )}
 
-          {/* Success bubble (Kept for fallback/legacy compatibility) */}
           {status === "success" && (
             <div className="flex justify-start">
               <div className="w-6 h-6 rounded-full bg-emerald-100 flex items-center justify-center mr-2 mt-0.5 shrink-0">
@@ -277,10 +287,10 @@ export default function InvoiceGeneratorPage() {
               </div>
               <div className="bg-emerald-50 border border-emerald-200 rounded-2xl rounded-tl-sm px-4 py-3 max-w-[78%]">
                 <p className="text-sm font-medium text-emerald-800 flex items-center gap-1.5">
-                  <FileDown className="w-3.5 h-3.5" />
-                  Invoice downloaded
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  Success
                 </p>
-                <p className="text-xs text-emerald-600 mt-0.5 font-mono">{successFile}</p>
+                <p className="text-xs text-emerald-700 mt-0.5">{successFile}</p>
                 <button
                   onClick={handleReset}
                   className="mt-2 text-xs text-emerald-700 underline underline-offset-2 hover:text-emerald-900"
@@ -294,10 +304,8 @@ export default function InvoiceGeneratorPage() {
           <div ref={chatBottomRef} />
         </div>
 
-        {/* ── Divider ── */}
         <div className="border-t border-[#f3f4f6]" />
 
-        {/* ── Error Banner ── */}
         {status === "error" && errorMessage && (
           <div className="mx-4 mt-3 flex items-start gap-2.5 rounded-lg border border-red-200 bg-red-50 px-4 py-3">
             <AlertCircle className="w-4 h-4 text-red-500 mt-0.5 shrink-0" />
@@ -312,9 +320,7 @@ export default function InvoiceGeneratorPage() {
             </div>
           </div>
         )}
-
-        {/* ── Input Area ── */}
-        <div className="px-4 py-4 flex items-end gap-3">
+<div className="px-4 py-4 flex items-end gap-3">
           <textarea
             ref={inputRef}
             value={input}
@@ -325,7 +331,8 @@ export default function InvoiceGeneratorPage() {
               e.target.style.height = Math.min(e.target.scrollHeight, 120) + "px";
             }}
             onKeyDown={handleKeyDown}
-            disabled={isLoading || status === "success"}
+            // 1. REMOVED the success lock here
+            disabled={isLoading} 
             placeholder={
               messages.length === 0
                 ? "Describe your invoice…"
@@ -343,11 +350,12 @@ export default function InvoiceGeneratorPage() {
           />
           <button
             onClick={handleSend}
-            disabled={isLoading || !input.trim() || status === "success"}
+            // 2. REMOVED the success lock here
+            disabled={isLoading || !input.trim()} 
             className={`shrink-0 inline-flex items-center justify-center w-11 h-11 rounded-xl
               transition-all duration-150
               focus:outline-none focus:ring-2 focus:ring-[#1f3864]/30 focus:ring-offset-1
-              ${isLoading || !input.trim() || status === "success"
+              ${isLoading || !input.trim()
                 ? "bg-[#1f3864]/30 cursor-not-allowed"
                 : "bg-[#1f3864] hover:bg-[#162b50] active:scale-95 shadow-sm"
               }`}
@@ -364,7 +372,6 @@ export default function InvoiceGeneratorPage() {
         </p>
       </div>
 
-      {/* ── Footer ── */}
       <p className="mt-8 text-xs text-[#d1d5db]">
         Pentacles Legal Partners LLP · AI-assisted tooling
       </p>
