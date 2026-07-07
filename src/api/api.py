@@ -98,6 +98,39 @@ async def prompt_to_invoice_generator(response: PromptRequestModel):
     invoice_id = str(uuid.uuid4())[:8]
     expense_id = str(uuid.uuid4())[:8]
     prompt = str(response.prompt)
+
+    client_directory_text = ""
+    try:
+        conn = psycopg2.connect(DB_URL)
+        cursor = conn.cursor()
+
+        # Adjust 'clients' and the column names based on your actual Supabase table!
+        cursor.execute(
+            "SELECT name, address_line1, address_line2 FROM clients LIMIT 50;"
+        )
+        clients = cursor.fetchall()
+
+        if clients:
+            # Format the data into a clean string for the LLM
+            directory_list = [f"{c[0]}: {c[1]}, {c[2]}" for c in clients]
+            client_directory_text = (
+                "\n\n[SYSTEM NOTE: KNOWN CLIENT DIRECTORY]\n"
+                + "\n".join(directory_list)
+            )
+
+        cursor.close()
+        conn.close()
+    except Exception as e:
+        print(f"⚠️ Could not fetch client directory (Table might not exist yet): {e}")
+        pass  # Fail silently so the app doesn't crash if the table is empty
+
+    # Glue the directory to the user's prompt!
+    enriched_prompt = prompt + client_directory_text
+    print("🧠 Sending prompt + client directory to Pass 1...")
+    llm_response = generate_json_for_inbvoice_from_prompt(enriched_prompt)
+
+    action = llm_response.get("action")
+
     print(f"📥 Received text prompt: {prompt}")
     try:
         llm_response = generate_json_for_inbvoice_from_prompt(prompt)
@@ -111,7 +144,6 @@ async def prompt_to_invoice_generator(response: PromptRequestModel):
             content={"status": "clarification", "message": llm_response["message"]}
         )
     ai_json = llm_response.get("data", {})
-
     if ai_json.get("status") == "clarification":
         print("🟡 AI requested clarification (JSON). Sending back to UI.")
         return JSONResponse(
@@ -120,6 +152,37 @@ async def prompt_to_invoice_generator(response: PromptRequestModel):
     action = ai_json.get("action", "draft_invoice")
     # DRAFT mode
     if action == "draft_invoice":
+        client_data = ai_json.get("client", {})
+        client_name = client_data.get("name")
+        address = client_data.get("address", {})
+        line1 = address.get("line1", "")
+        line2 = address.get("line2", "")
+
+        if client_name and line1:
+            print(f"🔍 Checking if client '{client_name}' is in the directory...")
+            try:
+                conn = psycopg2.connect(DB_URL)
+                cursor = conn.cursor()
+
+                # Using PostgreSQL 'ON CONFLICT DO NOTHING' to safely ignore duplicates
+                cursor.execute(
+                    """
+                    INSERT INTO clients (name, address_line1, address_line2) 
+                    VALUES (%s, %s, %s) 
+                    ON CONFLICT (name) DO NOTHING;
+                """,
+                    (client_name, line1, line2),
+                )
+
+                # If a new row was inserted, rowcount will be 1
+                if cursor.rowcount > 0:
+                    print(f"✅ Successfully learned a new client: {client_name}!")
+
+                conn.commit()
+                cursor.close()
+                conn.close()
+            except Exception as e:
+                print(f"⚠️ Failed to auto-save client background task: {e}")
         print("✅ Validating AI output structure...")
         try:
             validating_payload = InvoicePayloadModel(**llm_response["data"])
@@ -283,25 +346,49 @@ async def prompt_to_invoice_generator(response: PromptRequestModel):
 
             timeframe = ai_json.get("timeframe", "all")
 
-            query = """
-                SELECT TO_CHAR(created_at, 'Mon YYYY'), transaction_type, party_name, amount 
-            FROM firm_financials 
-            ORDER BY created_at DESC LIMIT 100;
-            """
-            cursor.execute(query)
-            raw_rows = cursor.fetchall()
+            cursor.execute("""
+                SELECT TO_CHAR(created_at, 'Mon YYYY'), transaction_type, SUM(amount) 
+                FROM firm_financials 
+                GROUP BY 1, 2 ORDER BY MIN(created_at) DESC;
+            """)
+            time_rows = cursor.fetchall()
+
+            cursor.execute("""
+                SELECT TO_CHAR(created_at, 'Mon YYYY'), COALESCE(party_name, 'Unknown'), SUM(amount) 
+                FROM firm_financials 
+                WHERE transaction_type = 'EARNING' 
+                GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 50;
+            """)
+            client_rows = cursor.fetchall()
+
+            cursor.execute("""
+                SELECT TO_CHAR(created_at, 'Mon YYYY'), COALESCE(party_name, 'General/Unknown'), SUM(amount) 
+                FROM firm_financials 
+                WHERE transaction_type = 'EXPENSE' 
+                GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 50;
+            """)
+            expense_rows = cursor.fetchall()
             cursor.close()
             conn.close()
 
-            data_string = " | ".join(
-                [f"{r[0]}: {r[1]} of ₹{r[3]} ({r[2]})" for r in raw_rows]
+            data_string = (
+                "--- OVERALL MONTHLY TRENDS ---\n"
+                + " | ".join([f"{r[0]}: {r[1]} ₹{r[2]}" for r in time_rows])
+                + "\n\n"
+                + "--- EARNINGS BY CLIENT (Per Month) ---\n"
+                + " | ".join([f"{r[0]} - {r[1]}: ₹{r[2]}" for r in client_rows])
+                + "\n\n"
+                + "--- EXPENSES BY CATEGORY (Per Month) ---\n"
+                + " | ".join([f"{r[0]} - {r[1]}: ₹{r[2]}" for r in expense_rows])
             )
+
             analyst_prompt = (
                 f"[SYSTEM NOTE: RAW FINANCIAL DATA]\n"
                 f"USER'S SPECIFIC REQUEST: {prompt}\n\n"
-                f"Here is the raw data. You MUST generate the exact charts the user requested above. "
-                f"Data: {data_string}"
+                f"Here is the pre-aggregated database. Filter these summaries based on the user's requested timeframe and build the requested charts.\n\n"
+                f"{data_string}"
             )
+
             print("🧠 Sending raw data back to AI for analysis...")
             second_llm_response = generate_json_for_inbvoice_from_prompt(analyst_prompt)
 
