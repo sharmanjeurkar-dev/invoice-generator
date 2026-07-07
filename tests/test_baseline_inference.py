@@ -58,9 +58,7 @@ def generate_json_for_inbvoice_from_prompt(query: str) -> dict:
         # Extract ONLY the JSON part
         cleaned_response = raw_response[start_idx : end_idx + 1]
         parsed_json = json.loads(cleaned_response, strict=False)
-        print(
-            "🟢 STATUS: [GENERATION MODE] - Final Invoice JSON Generated Successfully:\n"
-        )
+        print("🟢 STATUS: [GENERATION MODE] - Final  JSON Generated Successfully:\n")
         return {"status": "success", "data": parsed_json}
     else:
         return {"status": "clarification", "message": raw_response}
