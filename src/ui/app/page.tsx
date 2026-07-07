@@ -1,6 +1,10 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import { 
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, 
+  PieChart, Pie, Cell, LineChart, Line 
+} from 'recharts';
 import {
   Scale,
   Send,
@@ -13,12 +17,15 @@ import {
 
 type Role = "user" | "ai";
 
+const COLORS = ['#10B981', '#EF4444', '#3B82F6', '#F59E0B'];
+
 interface Message {
   id: string;
   role: Role;
   text: string;
   fileUrl?: string;
   fileName?: string;
+  dashboardData?: any; // Replaced chartData with dashboardData for Generative UI
 }
 
 type Status = "idle" | "thinking" | "rendering" | "success" | "error";
@@ -28,7 +35,7 @@ function generateInvoiceId() {
 }
 
 function buildPromptPayload(messages: Message[], latestUserText: string, sessionId: string): string {
-  const systemNote = `\n\n[SYSTEM NOTE: The strict invoice_number for this session is ${sessionId}. You MUST use this exact ID in your JSON.]`;
+  const systemNote = `\n\n[SYSTEM NOTE: IF you are drafting an invoice, the invoice_number for this session is ${sessionId}. Ignore this ID if the user is logging an expense or asking for a report.]`;
   
   if (messages.length === 0) return latestUserText + systemNote;
 
@@ -45,6 +52,12 @@ function uid() {
   return Math.random().toString(36).slice(2, 9);
 }
 
+// Helper to format large numbers cleanly on the Y-Axis
+function formatYAxisValue(value: number) {
+  if (value >= 1000) return `₹${value / 1000}k`;
+  return `₹${value}`;
+}
+
 export default function InvoiceGeneratorPage() {
   const fetchNewInvoiceId = async () => {
     try {
@@ -57,6 +70,7 @@ export default function InvoiceGeneratorPage() {
       console.error("Failed to fetch ID", err);
     }
   };
+  
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [status, setStatus] = useState<Status>("idle");
@@ -89,7 +103,7 @@ export default function InvoiceGeneratorPage() {
 
     if (inputRef.current) inputRef.current.style.height = "44px";
 
-    const promptPayload = buildPromptPayload(previousMessages, text, sessionInvoiceId);;
+    const promptPayload = buildPromptPayload(previousMessages, text, sessionInvoiceId);
 
     try {
       const response = await fetch(
@@ -114,19 +128,25 @@ export default function InvoiceGeneratorPage() {
 
       if (contentType.includes("application/json")) {
         const data = await response.json();
-        
+
         if (data.status === "success") {
           setStatus("success");
           setSuccessFile(data.message);
-        } else {
-          const aiMsg: Message = {
-            id: uid(),
-            role: "ai",
-            text: data.message ?? "Could you clarify a few details?",
+        } else if (data.status === "analytics_dashboard") {
+          // Catch the AI Dashboard Generative UI
+          const aiMsg: Message = { 
+            id: uid(), 
+            role: "ai", 
+            text: data.executive_summary,
+            dashboardData: data.charts 
           };
           setMessages((prev) => [...prev, aiMsg]);
           setStatus("idle");
-          setTimeout(() => inputRef.current?.focus(), 50);
+        } else {
+          // Fallback for Clarification messages
+          const aiMsg: Message = { id: uid(), role: "ai", text: data.message };
+          setMessages((prev) => [...prev, aiMsg]);
+          setStatus("idle");
         }
 
       } else if (contentType.includes("application/pdf")) {
@@ -180,7 +200,7 @@ export default function InvoiceGeneratorPage() {
     setStatus("idle");
     setErrorMessage("");
     setSuccessFile("");
-    fetchNewInvoiceId(); // <--- Grabs the NEXT sequence number for the new chat
+    fetchNewInvoiceId(); 
     setTimeout(() => inputRef.current?.focus(), 50);
   };
 
@@ -194,27 +214,28 @@ export default function InvoiceGeneratorPage() {
           </span>
         </div>
         <h1 className="text-2xl font-bold tracking-tight text-[#1a1a1a]">
-          AI Invoice Generator
+          AI Financial Controller
         </h1>
         <p className="mt-1 text-sm text-[#6b7280] max-w-sm mx-auto">
-          Describe your invoice in plain English. The AI will ask if it needs anything else.
+          Draft invoices, log expenses, and generate financial reports.
         </p>
       </div>
 
-      <div className="w-full max-w-2xl bg-white border border-[#e5e7eb] rounded-2xl shadow-sm flex flex-col overflow-hidden">
-        <div className="overflow-y-auto px-5 py-5 space-y-4 min-h-[360px] max-h-[480px]">
+      <div className="w-full max-w-4xl bg-white border border-[#e5e7eb] rounded-2xl shadow-sm flex flex-col overflow-hidden">
+        <div className="overflow-y-auto px-5 py-6 space-y-5 min-h-[450px] max-h-[650px]">
           {messages.length === 0 && !isLoading && status !== "error" && (
             <div className="h-full flex flex-col items-center justify-center text-center py-10 gap-3">
               <div className="w-12 h-12 rounded-full bg-[#1f3864]/10 flex items-center justify-center">
                 <Sparkles className="w-5 h-5 text-[#1f3864] opacity-60" />
               </div>
               <p className="text-sm text-[#9ca3af] max-w-xs leading-relaxed">
-                Start by describing your invoice — client, services, amounts, and address.
+                Start by describing your invoice, logging a firm expense, or asking for a financial report.
               </p>
-              <div className="mt-1 flex flex-col gap-1.5 w-full max-w-xs">
+              <div className="mt-1 flex flex-col gap-1.5 w-full max-w-md">
                 {[
-                  "Invoice Autobahn Trucking for ₹30k for Legal Opinion…",
-                  "Create invoice for Ram Sharma, ₹15,000 for document review…",
+                  "Invoice Autobahn Trucking for ₹30,000 for Legal Opinion…",
+                  "Log an expense of ₹5000 for the firm electricity bill",
+                  "Analyze our financials and give me a complete breakdown."
                 ].map((ex) => (
                   <button
                     key={ex}
@@ -237,25 +258,74 @@ export default function InvoiceGeneratorPage() {
               className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
             >
               {msg.role === "ai" && (
-                <div className="w-6 h-6 rounded-full bg-[#1f3864]/10 flex items-center justify-center mr-2 mt-0.5 shrink-0">
+                <div className="w-6 h-6 rounded-full bg-[#1f3864]/10 flex items-center justify-center mr-3 mt-0.5 shrink-0">
                   <Scale className="w-3 h-3 text-[#1f3864] opacity-70" />
                 </div>
               )}
+              {/* If there's dashboardData, expand to full width */}
               <div
-                className={`max-w-[78%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap
+                className={`${msg.dashboardData ? "w-full" : "max-w-[78%]"} rounded-2xl px-5 py-3.5 text-sm leading-relaxed whitespace-pre-wrap
                   ${msg.role === "user"
                     ? "bg-[#1f3864] text-white rounded-tr-sm"
-                    : "bg-[#f3f4f6] text-[#374151] rounded-tl-sm border border-[#e5e7eb]"
+                    : "bg-[#f9fafb] text-[#374151] rounded-tl-sm border border-[#e5e7eb] shadow-sm"
                   }`}
               >
                 {msg.text}
                 
+                {/* 👇 TRULY DYNAMIC GENERATIVE AI DASHBOARD 👇 */}
+                {msg.dashboardData && (
+                  <div className="mt-5 space-y-6 w-full">
+                    {msg.dashboardData.map((chart: any, index: number) => (
+                      <div key={index} className="p-6 bg-white rounded-xl shadow-sm border border-[#e5e7eb]">
+                        <h3 className="text-sm font-semibold text-[#1f3864] mb-6 text-center">{chart.title}</h3>
+                        <div className="h-[280px] w-full">
+                          <ResponsiveContainer width="100%" height="100%">
+                            {chart.chart_type === "bar" ? (
+                              <BarChart data={chart.data} margin={{ top: 10, right: 10, left: 0, bottom: 5 }}>
+                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f3f4f6" />
+                                <XAxis dataKey={chart.x_key || "period"} stroke="#6b7280" fontSize={11} tickLine={false} axisLine={false} dy={10} />
+                                <YAxis stroke="#6b7280" fontSize={11} tickLine={false} axisLine={false} tickFormatter={formatYAxisValue} width={50}/>
+                                <Tooltip cursor={{ fill: '#f9fafb' }} contentStyle={{ borderRadius: '8px', border: '1px solid #e5e7eb', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', fontSize: '13px' }} formatter={(v: number) => [`₹${v.toLocaleString()}`, undefined]} />
+                                <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '15px' }} />
+                                {chart.data_keys?.map((key: string, i: number) => (
+                                  <Bar key={key} name={key} dataKey={key} fill={COLORS[i % COLORS.length]} radius={[4, 4, 0, 0]} maxBarSize={45} />
+                                ))}
+                              </BarChart>
+                            ) : chart.chart_type === "line" ? (
+                              <LineChart data={chart.data} margin={{ top: 10, right: 10, left: 0, bottom: 5 }}>
+                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f3f4f6" />
+                                <XAxis dataKey={chart.x_key || "period"} stroke="#6b7280" fontSize={11} tickLine={false} axisLine={false} dy={10} />
+                                <YAxis stroke="#6b7280" fontSize={11} tickLine={false} axisLine={false} tickFormatter={formatYAxisValue} width={50}/>
+                                <Tooltip contentStyle={{ borderRadius: '8px', border: '1px solid #e5e7eb', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', fontSize: '13px' }} formatter={(v: number) => [`₹${v.toLocaleString()}`, undefined]} />
+                                <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '15px' }} />
+                                {chart.data_keys?.map((key: string, i: number) => (
+                                  <Line key={key} type="monotone" name={key} dataKey={key} stroke={COLORS[i % COLORS.length]} strokeWidth={2.5} dot={{ r: 4 }} activeDot={{ r: 6 }} />
+                                ))}
+                              </LineChart>
+                            ) : (
+                              <PieChart>
+                                <Pie data={chart.data} cx="50%" cy="50%" innerRadius={70} outerRadius={90} paddingAngle={4} dataKey="value" nameKey="name">
+                                  {chart.data.map((entry: any, i: number) => (
+                                    <Cell key={`cell-${i}`} fill={COLORS[i % COLORS.length]} />
+                                  ))}
+                                </Pie>
+                                <Tooltip contentStyle={{ borderRadius: '8px', border: '1px solid #e5e7eb', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', fontSize: '13px' }} formatter={(v: number) => `₹${v.toLocaleString()}`} />
+                                <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '15px' }} />
+                              </PieChart>
+                            )}
+                          </ResponsiveContainer>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                
                 {msg.fileUrl && (
-                  <div className="mt-3">
+                  <div className="mt-4">
                     <a
                       href={msg.fileUrl}
                       download={msg.fileName}
-                      className="inline-flex items-center gap-2 bg-white border border-[#e5e7eb] text-[#1f3864] px-4 py-2 rounded-lg text-xs font-semibold hover:bg-[#f9fafb] transition-colors shadow-sm"
+                      className="inline-flex items-center gap-2 bg-white border border-[#e5e7eb] text-[#1f3864] px-4 py-2 rounded-lg text-sm font-medium hover:bg-[#f3f4f6] transition-colors shadow-sm"
                     >
                       <FileDown className="w-4 h-4" />
                       Download {msg.fileName}
@@ -268,13 +338,13 @@ export default function InvoiceGeneratorPage() {
 
           {isLoading && (
             <div className="flex justify-start">
-              <div className="w-6 h-6 rounded-full bg-[#1f3864]/10 flex items-center justify-center mr-2 mt-0.5 shrink-0">
+              <div className="w-6 h-6 rounded-full bg-[#1f3864]/10 flex items-center justify-center mr-3 mt-0.5 shrink-0">
                 <Scale className="w-3 h-3 text-[#1f3864] opacity-70" />
               </div>
-              <div className="bg-[#f3f4f6] border border-[#e5e7eb] rounded-2xl rounded-tl-sm px-4 py-3 flex items-center gap-2">
-                <Loader2 className="w-3.5 h-3.5 text-[#1f3864] animate-spin" />
-                <span className="text-sm text-[#6b7280]">
-                  {status === "rendering" ? "Rendering PDF…" : "AI is thinking…"}
+              <div className="bg-[#f9fafb] border border-[#e5e7eb] shadow-sm rounded-2xl rounded-tl-sm px-5 py-3.5 flex items-center gap-3">
+                <Loader2 className="w-4 h-4 text-[#1f3864] animate-spin" />
+                <span className="text-sm font-medium text-[#6b7280]">
+                  {status === "rendering" ? "Rendering PDF…" : "AI is processing…"}
                 </span>
               </div>
             </div>
@@ -282,20 +352,20 @@ export default function InvoiceGeneratorPage() {
 
           {status === "success" && (
             <div className="flex justify-start">
-              <div className="w-6 h-6 rounded-full bg-emerald-100 flex items-center justify-center mr-2 mt-0.5 shrink-0">
+              <div className="w-6 h-6 rounded-full bg-emerald-100 flex items-center justify-center mr-3 mt-0.5 shrink-0">
                 <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
               </div>
-              <div className="bg-emerald-50 border border-emerald-200 rounded-2xl rounded-tl-sm px-4 py-3 max-w-[78%]">
-                <p className="text-sm font-medium text-emerald-800 flex items-center gap-1.5">
-                  <CheckCircle2 className="w-3.5 h-3.5" />
+              <div className="bg-emerald-50 border border-emerald-200 shadow-sm rounded-2xl rounded-tl-sm px-5 py-4 max-w-[78%]">
+                <p className="text-sm font-semibold text-emerald-800 flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4" />
                   Success
                 </p>
-                <p className="text-xs text-emerald-700 mt-0.5">{successFile}</p>
+                <p className="text-sm text-emerald-700 mt-1 whitespace-pre-wrap leading-relaxed">{successFile}</p>
                 <button
                   onClick={handleReset}
-                  className="mt-2 text-xs text-emerald-700 underline underline-offset-2 hover:text-emerald-900"
+                  className="mt-3 text-sm font-medium text-emerald-700 underline underline-offset-4 hover:text-emerald-900 transition-colors"
                 >
-                  Start a new invoice →
+                  Start a new request →
                 </button>
               </div>
             </div>
@@ -307,20 +377,20 @@ export default function InvoiceGeneratorPage() {
         <div className="border-t border-[#f3f4f6]" />
 
         {status === "error" && errorMessage && (
-          <div className="mx-4 mt-3 flex items-start gap-2.5 rounded-lg border border-red-200 bg-red-50 px-4 py-3">
+          <div className="mx-4 mt-3 flex items-start gap-2.5 rounded-lg border border-red-200 bg-red-50 px-4 py-3 shadow-sm">
             <AlertCircle className="w-4 h-4 text-red-500 mt-0.5 shrink-0" />
             <div className="flex-1">
-              <p className="text-sm text-red-700 leading-snug">{errorMessage}</p>
+              <p className="text-sm font-medium text-red-700 leading-snug">{errorMessage}</p>
               <button
                 onClick={() => setStatus("idle")}
-                className="mt-1 text-xs text-red-600 underline underline-offset-2 hover:text-red-800"
+                className="mt-1 text-xs font-semibold text-red-600 underline underline-offset-2 hover:text-red-800"
               >
                 Dismiss
               </button>
             </div>
           </div>
         )}
-<div className="px-4 py-4 flex items-end gap-3">
+        <div className="px-5 py-4 flex items-end gap-3 bg-white">
           <textarea
             ref={inputRef}
             value={input}
@@ -331,48 +401,46 @@ export default function InvoiceGeneratorPage() {
               e.target.style.height = Math.min(e.target.scrollHeight, 120) + "px";
             }}
             onKeyDown={handleKeyDown}
-            // 1. REMOVED the success lock here
             disabled={isLoading} 
             placeholder={
               messages.length === 0
-                ? "Describe your invoice…"
+                ? "Describe your invoice, expense, or ask for a report…"
                 : "Reply to the AI…"
             }
             rows={1}
             className={`flex-1 resize-none rounded-xl border px-4 py-3 text-sm text-[#111827]
-              placeholder-[#9ca3af] leading-relaxed
-              focus:outline-none focus:ring-2 focus:ring-[#1f3864]/25 focus:border-[#1f3864]
-              transition-colors duration-150 overflow-hidden
+              placeholder-[#9ca3af] leading-relaxed shadow-sm
+              focus:outline-none focus:ring-2 focus:ring-[#1f3864]/20 focus:border-[#1f3864]
+              transition-all duration-200 overflow-hidden
               disabled:bg-[#f9fafb] disabled:cursor-not-allowed
-              ${status === "error" ? "border-red-300" : "border-[#d1d5db]"}
+              ${status === "error" ? "border-red-300 ring-1 ring-red-100" : "border-[#d1d5db]"}
             `}
-            style={{ height: "44px" }}
+            style={{ height: "46px" }}
           />
           <button
             onClick={handleSend}
-            // 2. REMOVED the success lock here
             disabled={isLoading || !input.trim()} 
-            className={`shrink-0 inline-flex items-center justify-center w-11 h-11 rounded-xl
-              transition-all duration-150
-              focus:outline-none focus:ring-2 focus:ring-[#1f3864]/30 focus:ring-offset-1
+            className={`shrink-0 inline-flex items-center justify-center w-[46px] h-[46px] rounded-xl
+              transition-all duration-200
+              focus:outline-none focus:ring-2 focus:ring-[#1f3864]/30 focus:ring-offset-2
               ${isLoading || !input.trim()
-                ? "bg-[#1f3864]/30 cursor-not-allowed"
-                : "bg-[#1f3864] hover:bg-[#162b50] active:scale-95 shadow-sm"
+                ? "bg-[#f3f4f6] text-[#9ca3af] border border-[#e5e7eb] cursor-not-allowed"
+                : "bg-[#1f3864] text-white hover:bg-[#162b50] active:scale-95 shadow-md hover:shadow-lg"
               }`}
           >
             {isLoading
-              ? <Loader2 className="w-4 h-4 text-white animate-spin" />
-              : <Send className="w-4 h-4 text-white" />
+              ? <Loader2 className="w-5 h-5 animate-spin" />
+              : <Send className="w-4 h-4 ml-0.5" />
             }
           </button>
         </div>
 
-        <p className="text-center text-[10px] text-[#d1d5db] pb-3">
+        <p className="text-center text-[11px] font-medium text-[#9ca3af] pb-4 bg-white">
           Enter to send · Shift+Enter for new line
         </p>
       </div>
 
-      <p className="mt-8 text-xs text-[#d1d5db]">
+      <p className="mt-8 text-xs font-medium text-[#9ca3af]">
         Pentacles Legal Partners LLP · AI-assisted tooling
       </p>
     </main>
