@@ -4,6 +4,7 @@ from typing import List, Optional
 
 import anyio
 import psycopg2
+import psycopg2.extras
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -16,6 +17,7 @@ from src.document.Pdf_generator import generate_invoice_pdf
 from tests.test_baseline_inference import generate_json_for_inbvoice_from_prompt
 
 
+# invice
 class AddressModel(BaseModel):
     line1: str
     line2: Optional[str] = None
@@ -48,6 +50,18 @@ class InvoicePayloadModel(BaseModel):
 
 class PromptRequestModel(BaseModel):
     prompt: str
+
+
+# Firm settings
+class FirmSettings(BaseModel):
+    firm_name: str
+    address_line1: Optional[str] = None
+    address_line2: Optional[str] = None
+    email_sender: Optional[str] = None
+    bank_name: Optional[str] = None
+    account_number: Optional[str] = None
+    ifsc_code: Optional[str] = None
+    logo_url: Optional[str] = None
 
 
 app = FastAPI(
@@ -430,3 +444,71 @@ async def prompt_to_invoice_generator(response: PromptRequestModel):
             raise HTTPException(
                 status_code=500, detail=f"Failed to analyze data: {str(e)}"
             )
+
+
+@app.get("/api/firms/{firm_id}/settings")
+async def get_settings(firm_id: str):
+    try:
+        conn = psycopg2.connect(DB_URL)
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+        cursor.execute("SELECT * FROM firm_settings WHERE id = %s", (firm_id))
+        settings = cursor.fetchone()
+
+        cursor.close()
+        conn.close()
+
+        if not settings:
+            return {}
+        return settings
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/firms/{firm_id}/settings")
+async def update_settings(firm_id: int, settings: FirmSettings):
+    try:
+        conn = psycopg2.connect(DB_URL)
+        cursor = conn.cursor()
+
+        # Inject the dynamic firm_id into the UPSERT statement
+        cursor.execute(
+            """
+            INSERT INTO firm_settings 
+            (id, firm_name, address_line1, address_line2, email_sender, bank_name, account_number, ifsc_code, logo_url, updated_at) 
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+            ON CONFLICT (id) DO UPDATE SET 
+                firm_name = EXCLUDED.firm_name,
+                address_line1 = EXCLUDED.address_line1,
+                address_line2 = EXCLUDED.address_line2,
+                email_sender = EXCLUDED.email_sender,
+                bank_name = EXCLUDED.bank_name,
+                account_number = EXCLUDED.account_number,
+                ifsc_code = EXCLUDED.ifsc_code,
+                logo_url = EXCLUDED.logo_url,
+                updated_at = NOW();
+        """,
+            (
+                firm_id,  # <--- Dynamic ID inserted here
+                settings.firm_name,
+                settings.address_line1,
+                settings.address_line2,
+                settings.email_sender,
+                settings.bank_name,
+                settings.account_number,
+                settings.ifsc_code,
+                settings.logo_url,
+            ),
+        )
+
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+        return {
+            "status": "success",
+            "message": f"Settings for firm {firm_id} updated successfully.",
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

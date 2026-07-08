@@ -9,6 +9,8 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.110.1",
+    "dotenv": "^17.4.2",
     "html2canvas": "^1.4.1",
     "lucide-react": "^1.21.0",
     "next": "16.2.9",

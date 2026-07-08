@@ -6,6 +6,7 @@ import {
   PieChart, Pie, Cell, LineChart, Line 
 } from 'recharts';
 import html2canvas from 'html2canvas';
+import Link from 'next/link';
 import {
   Scale,
   Send,
@@ -14,6 +15,7 @@ import {
   CheckCircle2,
   FileDown,
   Sparkles,
+  Settings
 } from "lucide-react";
 
 type Role = "user" | "ai";
@@ -231,7 +233,19 @@ const handleDownloadDashboard = async (elementId: string) => {
 
   return (
     <main className="min-h-screen bg-[#F7F7F5] flex flex-col items-center justify-center px-4 py-10 font-sans">
-      <div className="mb-6 text-center">
+     <div className="mb-6 text-center relative w-full max-w-4xl">
+        
+        {/* The New Settings Button in the top right */}
+        <div className="absolute right-0 top-0">
+          <Link 
+            href="/settings"
+            className="inline-flex items-center gap-2 text-sm font-medium text-[#6b7280] hover:text-[#1f3864] bg-white border border-[#e5e7eb] px-3 py-2 rounded-lg shadow-sm transition-colors"
+          >
+            <Settings className="w-4 h-4" />
+            Firm Settings
+          </Link>
+        </div>
+
         <div className="inline-flex items-center gap-2 mb-2">
           <Scale className="w-5 h-5 text-[#1f3864]" strokeWidth={1.5} />
           <span className="text-xs font-semibold tracking-[0.2em] uppercase text-[#1f3864] opacity-70">
@@ -485,7 +499,7 @@ const handleDownloadDashboard = async (elementId: string) => {
       </div>
 
       <p className="mt-8 text-xs font-medium text-[#9ca3af]">
-        Pentacles Legal Partners LLP · AI-assisted tooling
+        FINANCE AND ACCOUNTING · AI-assisted tooling
       </p>
     </main>
   );
