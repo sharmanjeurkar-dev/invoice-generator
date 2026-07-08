@@ -17,9 +17,9 @@ from tests.test_baseline_inference import generate_json_for_inbvoice_from_prompt
 
 
 class AddressModel(BaseModel):
-    line1: Optional[str] = ""
-    line2: Optional[str] = ""
-    line3: Optional[str] = ""
+    line1: str
+    line2: Optional[str] = None
+    line3: Optional[str] = None
 
 
 class ClientModel(BaseModel):
@@ -153,10 +153,25 @@ async def prompt_to_invoice_generator(response: PromptRequestModel):
     # DRAFT mode
     if action == "draft_invoice":
         client_data = ai_json.get("client", {})
+        address = client_data.get("address", {})
+
+        if not address.get("line1"):
+            print(
+                "🛡️ Python caught a null address hallucination! Forcing clarification."
+            )
+            return JSONResponse(
+                content={
+                    "status": "clarification",
+                    "message": "I don't have an address on file for this client. Could you please provide their full address?",
+                }
+            )
+
+        client_data = ai_json.get("client", {})
         client_name = client_data.get("name")
         address = client_data.get("address", {})
         line1 = address.get("line1", "")
         line2 = address.get("line2", "")
+        line3 = address.get("line3", "")
 
         if client_name and line1:
             print(f"🔍 Checking if client '{client_name}' is in the directory...")
@@ -167,11 +182,11 @@ async def prompt_to_invoice_generator(response: PromptRequestModel):
                 # Using PostgreSQL 'ON CONFLICT DO NOTHING' to safely ignore duplicates
                 cursor.execute(
                     """
-                    INSERT INTO clients (name, address_line1, address_line2) 
-                    VALUES (%s, %s, %s) 
+                    INSERT INTO clients (name, address_line1, address_line2,address_line3) 
+                    VALUES (%s, %s, %s, %s) 
                     ON CONFLICT (name) DO NOTHING;
                 """,
-                    (client_name, line1, line2),
+                    (client_name, line1, line2, line3),
                 )
 
                 # If a new row was inserted, rowcount will be 1
