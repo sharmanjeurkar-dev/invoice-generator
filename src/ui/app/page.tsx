@@ -5,6 +5,7 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, 
   PieChart, Pie, Cell, LineChart, Line 
 } from 'recharts';
+import html2canvas from 'html2canvas';
 import {
   Scale,
   Send,
@@ -25,7 +26,7 @@ interface Message {
   text: string;
   fileUrl?: string;
   fileName?: string;
-  dashboardData?: any; // Replaced chartData with dashboardData for Generative UI
+  dashboardData?: any; 
 }
 
 type Status = "idle" | "thinking" | "rendering" | "success" | "error";
@@ -34,6 +35,7 @@ function generateInvoiceId() {
   return `INV-${Math.floor(1000 + Math.random() * 9000)}`; 
 }
 
+// 👇 FIXED: Now uses the sessionId passed into the function instead of crashing
 function buildPromptPayload(messages: Message[], latestUserText: string, sessionId: string): string {
   const systemNote = `\n\n[SYSTEM NOTE: IF you are drafting an invoice, the invoice_number for this session is ${sessionId}. Ignore this ID if the user is logging an expense or asking for a report.]`;
   
@@ -52,34 +54,57 @@ function uid() {
   return Math.random().toString(36).slice(2, 9);
 }
 
-// Helper to format large numbers cleanly on the Y-Axis
 function formatYAxisValue(value: number) {
   if (value >= 1000) return `₹${value / 1000}k`;
   return `₹${value}`;
 }
 
 export default function InvoiceGeneratorPage() {
-  const fetchNewInvoiceId = async () => {
-    try {
-      const res = await fetch("http://127.0.0.1:8000/api/get-next-invoice-id");
-      const data = await res.json();
-      if (data.invoice_id) {
-        setSessionInvoiceId(data.invoice_id);
-      }
-    } catch (err) {
-      console.error("Failed to fetch ID", err);
-    }
-  };
-  
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [status, setStatus] = useState<Status>("idle");
   const [errorMessage, setErrorMessage] = useState("");
   const [successFile, setSuccessFile] = useState("");
-  const [sessionInvoiceId, setSessionInvoiceId] = useState("");
+  
+  const invoiceIdRef = useRef<string>("");
   const chatBottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const isLoading = status === "thinking" || status === "rendering";
+
+const handleDownloadDashboard = async (elementId: string) => {
+    const element = document.getElementById(elementId);
+    if (!element) return;
+
+    try {
+      const canvas = await html2canvas(element, { 
+        scale: 2, // Doubles the resolution for crisp text
+        backgroundColor: "#ffffff", // Ensures the background isn't transparent/black
+        useCORS: true 
+      });
+      
+      const dataUrl = canvas.toDataURL("image/png");
+      const link = document.createElement("a");
+      link.download = `Financial_Dashboard_${Date.now()}.png`;
+      link.href = dataUrl;
+      link.click();
+    } catch (err) {
+      console.error("Failed to download charts:", err);
+    }
+  };
+
+  // 👇 FIXED: This is now a clean, dedicated fetch function
+  const fetchNewInvoiceId = async () => {
+    try {
+      const res = await fetch("http://127.0.0.1:8000/api/get-next-invoice-id");
+      const data = await res.json();
+      if (data.invoice_id) {
+        // Update the ref to ensure we always have the freshest ID!
+        invoiceIdRef.current = data.invoice_id;
+      }
+    } catch (err) {
+      console.error("Failed to fetch ID", err);
+    }
+  };
 
   useEffect(() => {
     chatBottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -87,6 +112,7 @@ export default function InvoiceGeneratorPage() {
 
   useEffect(() => {
     inputRef.current?.focus();
+    fetchNewInvoiceId();
   }, []);
 
   const handleSend = async () => {
@@ -103,7 +129,8 @@ export default function InvoiceGeneratorPage() {
 
     if (inputRef.current) inputRef.current.style.height = "44px";
 
-    const promptPayload = buildPromptPayload(previousMessages, text, sessionInvoiceId);
+    // 👇 FIXED: Pass the current value of the ref into the payload builder
+    const promptPayload = buildPromptPayload(previousMessages, text, invoiceIdRef.current);
 
     try {
       const response = await fetch(
@@ -133,7 +160,6 @@ export default function InvoiceGeneratorPage() {
           setStatus("success");
           setSuccessFile(data.message);
         } else if (data.status === "analytics_dashboard") {
-          // Catch the AI Dashboard Generative UI
           const aiMsg: Message = { 
             id: uid(), 
             role: "ai", 
@@ -143,13 +169,13 @@ export default function InvoiceGeneratorPage() {
           setMessages((prev) => [...prev, aiMsg]);
           setStatus("idle");
         } else {
-          // Fallback for Clarification messages
           const aiMsg: Message = { id: uid(), role: "ai", text: data.message };
           setMessages((prev) => [...prev, aiMsg]);
           setStatus("idle");
         }
 
       } else if (contentType.includes("application/pdf")) {
+        // 👇 FIXED: The PDF logic belongs here in handleSend
         const emailSentTo = response.headers.get("X-Email-Status");
         
         const blob = await response.blob();
@@ -171,6 +197,10 @@ export default function InvoiceGeneratorPage() {
         
         setMessages((prev) => [...prev, aiMsg]);
         setStatus("idle");
+        
+        // 👇 NEW: Fetch a fresh ID in the background now that this invoice is done! 👇
+        fetchNewInvoiceId(); 
+        
       } else {
         throw new Error(`Unexpected Content-Type: ${contentType}`);
       }
@@ -188,11 +218,6 @@ export default function InvoiceGeneratorPage() {
       handleSend();
     }
   };
-
- useEffect(() => {
-    inputRef.current?.focus();
-    fetchNewInvoiceId();
-  }, []);
 
   const handleReset = () => {
     setMessages([]);
@@ -214,7 +239,7 @@ export default function InvoiceGeneratorPage() {
           </span>
         </div>
         <h1 className="text-2xl font-bold tracking-tight text-[#1a1a1a]">
-          AI Financial Controller
+          LEDGER
         </h1>
         <p className="mt-1 text-sm text-[#6b7280] max-w-sm mx-auto">
           Draft invoices, log expenses, and generate financial reports.
@@ -262,7 +287,6 @@ export default function InvoiceGeneratorPage() {
                   <Scale className="w-3 h-3 text-[#1f3864] opacity-70" />
                 </div>
               )}
-              {/* If there's dashboardData, expand to full width */}
               <div
                 className={`${msg.dashboardData ? "w-full" : "max-w-[78%]"} rounded-2xl px-5 py-3.5 text-sm leading-relaxed whitespace-pre-wrap
                   ${msg.role === "user"
@@ -274,49 +298,69 @@ export default function InvoiceGeneratorPage() {
                 
                 {/* 👇 TRULY DYNAMIC GENERATIVE AI DASHBOARD 👇 */}
                 {msg.dashboardData && (
-                  <div className="mt-5 space-y-6 w-full">
-                    {msg.dashboardData.map((chart: any, index: number) => (
-                      <div key={index} className="p-6 bg-white rounded-xl shadow-sm border border-[#e5e7eb]">
-                        <h3 className="text-sm font-semibold text-[#1f3864] mb-6 text-center">{chart.title}</h3>
-                        <div className="h-[280px] w-full">
-                          <ResponsiveContainer width="100%" height="100%">
-                            {chart.chart_type === "bar" ? (
-                              <BarChart data={chart.data} margin={{ top: 10, right: 10, left: 0, bottom: 5 }}>
-                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f3f4f6" />
-                                <XAxis dataKey={chart.x_key || "period"} stroke="#6b7280" fontSize={11} tickLine={false} axisLine={false} dy={10} />
-                                <YAxis stroke="#6b7280" fontSize={11} tickLine={false} axisLine={false} tickFormatter={formatYAxisValue} width={50}/>
-                                <Tooltip cursor={{ fill: '#f9fafb' }} contentStyle={{ borderRadius: '8px', border: '1px solid #e5e7eb', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', fontSize: '13px' }} formatter={(v: number) => [`₹${v.toLocaleString()}`, undefined]} />
-                                <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '15px' }} />
-                                {chart.data_keys?.map((key: string, i: number) => (
-                                  <Bar key={key} name={key} dataKey={key} fill={COLORS[i % COLORS.length]} radius={[4, 4, 0, 0]} maxBarSize={45} />
-                                ))}
-                              </BarChart>
-                            ) : chart.chart_type === "line" ? (
-                              <LineChart data={chart.data} margin={{ top: 10, right: 10, left: 0, bottom: 5 }}>
-                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f3f4f6" />
-                                <XAxis dataKey={chart.x_key || "period"} stroke="#6b7280" fontSize={11} tickLine={false} axisLine={false} dy={10} />
-                                <YAxis stroke="#6b7280" fontSize={11} tickLine={false} axisLine={false} tickFormatter={formatYAxisValue} width={50}/>
-                                <Tooltip contentStyle={{ borderRadius: '8px', border: '1px solid #e5e7eb', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', fontSize: '13px' }} formatter={(v: number) => [`₹${v.toLocaleString()}`, undefined]} />
-                                <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '15px' }} />
-                                {chart.data_keys?.map((key: string, i: number) => (
-                                  <Line key={key} type="monotone" name={key} dataKey={key} stroke={COLORS[i % COLORS.length]} strokeWidth={2.5} dot={{ r: 4 }} activeDot={{ r: 6 }} />
-                                ))}
-                              </LineChart>
-                            ) : (
-                              <PieChart>
-                                <Pie data={chart.data} cx="50%" cy="50%" innerRadius={70} outerRadius={90} paddingAngle={4} dataKey="value" nameKey="name">
-                                  {chart.data.map((entry: any, i: number) => (
-                                    <Cell key={`cell-${i}`} fill={COLORS[i % COLORS.length]} />
+                  <div className="mt-5 w-full">
+                    {/* The Header with the Download Button */}
+                    <div className="flex justify-between items-center mb-4 px-1">
+                      <span className="text-xs font-semibold text-[#1f3864] uppercase tracking-widest opacity-80">
+                        Financial Analysis
+                      </span>
+                      <button
+                        onClick={() => handleDownloadDashboard(`dashboard-${msg.id}`)}
+                        className="inline-flex items-center gap-1.5 text-xs font-medium text-white bg-[#1f3864] hover:bg-[#162b50] px-3 py-1.5 rounded-lg transition-colors shadow-sm active:scale-95"
+                      >
+                        <FileDown className="w-3.5 h-3.5" />
+                        Save Charts as Image
+                      </button>
+                    </div>
+
+                    {/* The Container we take a snapshot of. Note the dynamic ID! */}
+                    <div 
+                      id={`dashboard-${msg.id}`} 
+                      className="space-y-6 w-full bg-[#f9fafb] p-4 rounded-xl border border-[#e5e7eb]"
+                    >
+                      {msg.dashboardData.map((chart: any, index: number) => (
+                        <div key={index} className="p-6 bg-white rounded-xl shadow-sm border border-[#e5e7eb]">
+                          <h3 className="text-sm font-semibold text-[#1f3864] mb-6 text-center">{chart.title}</h3>
+                          <div className="h-[280px] w-full">
+                            <ResponsiveContainer width="100%" height="100%">
+                              {chart.chart_type === "bar" ? (
+                                <BarChart data={chart.data} margin={{ top: 10, right: 10, left: 0, bottom: 5 }}>
+                                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f3f4f6" />
+                                  <XAxis dataKey={chart.x_key || "period"} stroke="#6b7280" fontSize={11} tickLine={false} axisLine={false} dy={10} />
+                                  <YAxis stroke="#6b7280" fontSize={11} tickLine={false} axisLine={false} tickFormatter={formatYAxisValue} width={50}/>
+                                  <Tooltip cursor={{ fill: '#f9fafb' }} contentStyle={{ borderRadius: '8px', border: '1px solid #e5e7eb', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', fontSize: '13px' }} formatter={(v: number) => [`₹${v.toLocaleString()}`, undefined]} />
+                                  <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '15px' }} />
+                                  {chart.data_keys?.map((key: string, i: number) => (
+                                    <Bar key={key} name={key} dataKey={key} fill={COLORS[i % COLORS.length]} radius={[4, 4, 0, 0]} maxBarSize={45} />
                                   ))}
-                                </Pie>
-                                <Tooltip contentStyle={{ borderRadius: '8px', border: '1px solid #e5e7eb', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', fontSize: '13px' }} formatter={(v: number) => `₹${v.toLocaleString()}`} />
-                                <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '15px' }} />
-                              </PieChart>
-                            )}
-                          </ResponsiveContainer>
+                                </BarChart>
+                              ) : chart.chart_type === "line" ? (
+                                <LineChart data={chart.data} margin={{ top: 10, right: 10, left: 0, bottom: 5 }}>
+                                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f3f4f6" />
+                                  <XAxis dataKey={chart.x_key || "period"} stroke="#6b7280" fontSize={11} tickLine={false} axisLine={false} dy={10} />
+                                  <YAxis stroke="#6b7280" fontSize={11} tickLine={false} axisLine={false} tickFormatter={formatYAxisValue} width={50}/>
+                                  <Tooltip contentStyle={{ borderRadius: '8px', border: '1px solid #e5e7eb', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', fontSize: '13px' }} formatter={(v: number) => [`₹${v.toLocaleString()}`, undefined]} />
+                                  <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '15px' }} />
+                                  {chart.data_keys?.map((key: string, i: number) => (
+                                    <Line key={key} type="monotone" name={key} dataKey={key} stroke={COLORS[i % COLORS.length]} strokeWidth={2.5} dot={{ r: 4 }} activeDot={{ r: 6 }} />
+                                  ))}
+                                </LineChart>
+                              ) : (
+                                <PieChart>
+                                  <Pie data={chart.data} cx="50%" cy="50%" innerRadius={70} outerRadius={90} paddingAngle={4} dataKey="value" nameKey="name">
+                                    {chart.data.map((entry: any, i: number) => (
+                                      <Cell key={`cell-${i}`} fill={COLORS[i % COLORS.length]} />
+                                    ))}
+                                  </Pie>
+                                  <Tooltip contentStyle={{ borderRadius: '8px', border: '1px solid #e5e7eb', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', fontSize: '13px' }} formatter={(v: number) => `₹${v.toLocaleString()}`} />
+                                  <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '15px' }} />
+                                </PieChart>
+                              )}
+                            </ResponsiveContainer>
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      ))}
+                    </div>
                   </div>
                 )}
                 
