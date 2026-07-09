@@ -1,7 +1,9 @@
-"use client"; // Required for Next.js App Router if using hooks
+"use client";
 
 import React, { useState, useEffect, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { createClient } from "@supabase/supabase-js";
+import { useFirmStore } from "../../store/useFirmStore"; // Adjust path if needed
 
 import {
   Building2,
@@ -13,11 +15,10 @@ import {
   CheckCircle2,
   AlertCircle,
 } from "lucide-react";
-console.log(process.env.NEXT_PUBLIC_SUPABASE_URL)
+
 // --- Supabase client -------------------------------------------------------
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
 
 const supabase = createClient(SUPABASE_URL as string, SUPABASE_ANON_KEY as string);
 
@@ -47,10 +48,7 @@ function SectionHeader({ icon: Icon, title, description }: any) {
 function Field({ label, name, value, onChange, placeholder, type = "text" }: any) {
   return (
     <div className="flex flex-col gap-1.5">
-      <label
-        htmlFor={name}
-        className="text-[13px] font-medium text-[#374151]"
-      >
+      <label htmlFor={name} className="text-[13px] font-medium text-[#374151]">
         {label}
       </label>
       <input
@@ -68,13 +66,12 @@ function Field({ label, name, value, onChange, placeholder, type = "text" }: any
 
 // --- Main component ----------------------------------------------------------
 
-// 👇 FIX 1: Removed firm_id from the props signature
-export default function FirmSettingsPage() {
+export default function SettingsPage() {
+  const router = useRouter();
   
-  // 👇 FIX 1: Hardcoded to 1 to prevent the 404 error
-  const firm_id = 1; 
+  // 👇 Pull the dynamic firmId and loading state from Zustand
+  const { firmId, isLoading: isFirmLoading } = useFirmStore();
 
-  // 👇 FIX 2: Updated state keys to perfectly match the Python Pydantic model
   const [form, setForm] = useState({
     firm_name: "",
     address_line1: "", 
@@ -92,16 +89,21 @@ export default function FirmSettingsPage() {
   const [showSuccess, setShowSuccess] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
 
-  // Fetch existing settings on mount
+  // Fetch existing settings on mount (only runs when firmId is ready)
   useEffect(() => {
     let cancelled = false;
 
     async function fetchSettings() {
+      if (!firmId) return; // Wait until we have the ID
+
       try {
-        const res = await fetch(`http://127.0.0.1:8000/api/firms/{firm_id}/settings`, { 
-  method: "GET" 
-});
+        // 👇 Fixed the template literal to use the dynamic ${firmId}
+        const res = await fetch(`http://127.0.0.1:8000/api/firms/${firmId}/settings`, { 
+          method: "GET" 
+        });
+        
         if (!res.ok) throw new Error(`Failed to load settings (${res.status})`);
+        
         const data = await res.json();
         if (!cancelled && Object.keys(data).length > 0) {
           setForm((prev) => ({ ...prev, ...data }));
@@ -115,11 +117,14 @@ export default function FirmSettingsPage() {
       }
     }
 
-    fetchSettings();
+    if (!isFirmLoading) {
+      fetchSettings();
+    }
+
     return () => {
       cancelled = true;
     };
-  }, [firm_id]);
+  }, [firmId, isFirmLoading]);
 
   const handleChange = useCallback((e: any) => {
     const { name, value } = e.target;
@@ -156,12 +161,17 @@ export default function FirmSettingsPage() {
     }
   }, []);
 
-const handleSave = useCallback(async () => {
+  const handleSave = useCallback(async () => {
+    if (!firmId) {
+      setErrorMsg("Authentication error. Please log in again.");
+      return;
+    }
+
     setSaving(true);
     setErrorMsg("");
 
     try {
-      const res = await fetch(`http://127.0.0.1:8000/api/firms/${firm_id}/settings`, {
+      const res = await fetch(`http://127.0.0.1:8000/api/firms/${firmId}/settings`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(form),
@@ -170,13 +180,27 @@ const handleSave = useCallback(async () => {
       if (!res.ok) throw new Error(`Save failed (${res.status})`);
 
       setShowSuccess(true);
-      setTimeout(() => setShowSuccess(false), 3000);
+      
+      // 👇 Wait 1 second to show success message, then redirect to /agent
+      setTimeout(() => {
+        router.push("/agent");
+      }, 1000);
+
     } catch (err) {
       setErrorMsg("Could not save settings. Please check your connection and try again.");
     } finally {
       setSaving(false);
     }
-  }, [form, firm_id]);
+  }, [form, firmId, router]);
+
+  // Show a loading screen while Zustand connects to Supabase
+  if (isFirmLoading) {
+    return (
+      <div className="min-h-screen w-full flex justify-center items-center bg-[#F7F7F5]">
+        <Loader2 className="h-8 w-8 animate-spin text-[#1f3864]" />
+      </div>
+    );
+  }
 
   return (
     <div
@@ -349,7 +373,7 @@ const handleSave = useCallback(async () => {
               {showSuccess && !errorMsg && (
                 <div className="flex items-center gap-1.5 text-[13px] text-emerald-600 animate-[fadeIn_0.15s_ease-out]">
                   <CheckCircle2 className="h-3.5 w-3.5" />
-                  Settings saved successfully
+                  Settings saved successfully! Redirecting...
                 </div>
               )}
             </div>
@@ -358,7 +382,7 @@ const handleSave = useCallback(async () => {
               type="button"
               onClick={handleSave}
               disabled={saving || uploading || loadingSettings}
-              className="inline-flex items-center gap-2 rounded-lg px-5 py-2.5 text-[13px] font-medium text-white transition-opacity disabled:opacity-60"
+              className="inline-flex items-center gap-2 rounded-lg px-5 py-2.5 text-[13px] font-medium text-white transition-opacity disabled:opacity-60 hover:opacity-90"
               style={{ backgroundColor: ACCENT }}
             >
               {saving && <Loader2 className="h-4 w-4 animate-spin" />}

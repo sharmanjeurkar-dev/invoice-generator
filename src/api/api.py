@@ -87,8 +87,8 @@ load_dotenv()
 DB_URL = os.getenv("DATABASE_URL")
 
 
-@app.get("/api/get-next-invoice-id")
-def get_next_invoice_id():
+@app.get("/api/firms/{firm_id}/get-next-invoice-id")
+def get_next_invoice_id(firm_id: str):
     try:
         db_url = os.getenv("DATABASE_URL")
         conn = psycopg2.connect(db_url)
@@ -107,8 +107,8 @@ def get_next_invoice_id():
         return {"error": str(e)}
 
 
-@app.post("/api/prompt-to-invoice")
-async def prompt_to_invoice_generator(response: PromptRequestModel):
+@app.post("/api/firms/{firm_id}/prompt-to-invoice")
+async def prompt_to_invoice_generator(firm_id: str, response: PromptRequestModel):
     invoice_id = str(uuid.uuid4())[:8]
     expense_id = str(uuid.uuid4())[:8]
     prompt = str(response.prompt)
@@ -452,7 +452,7 @@ async def get_settings(firm_id: str):
         conn = psycopg2.connect(DB_URL)
         cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
-        cursor.execute("SELECT * FROM firm_settings WHERE id = %s", (firm_id))
+        cursor.execute("SELECT * FROM firm_settings WHERE id = %s::uuid", (firm_id,))
         settings = cursor.fetchone()
 
         cursor.close()
@@ -467,7 +467,7 @@ async def get_settings(firm_id: str):
 
 
 @app.post("/api/firms/{firm_id}/settings")
-async def update_settings(firm_id: int, settings: FirmSettings):
+async def update_settings(firm_id: str, settings: FirmSettings):
     try:
         conn = psycopg2.connect(DB_URL)
         cursor = conn.cursor()
@@ -477,7 +477,7 @@ async def update_settings(firm_id: int, settings: FirmSettings):
             """
             INSERT INTO firm_settings 
             (id, firm_name, address_line1, address_line2, email_sender, bank_name, account_number, ifsc_code, logo_url, updated_at) 
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+            VALUES (%s::uuid, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
             ON CONFLICT (id) DO UPDATE SET 
                 firm_name = EXCLUDED.firm_name,
                 address_line1 = EXCLUDED.address_line1,

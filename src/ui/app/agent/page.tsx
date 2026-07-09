@@ -1,12 +1,13 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, 
   PieChart, Pie, Cell, LineChart, Line 
 } from 'recharts';
 import html2canvas from 'html2canvas';
 import Link from 'next/link';
+import { useFirmStore } from "../../store/useFirmStore"; // 👇 Added Zustand Store
 import {
   Scale,
   Send,
@@ -37,7 +38,6 @@ function generateInvoiceId() {
   return `INV-${Math.floor(1000 + Math.random() * 9000)}`; 
 }
 
-// 👇 FIXED: Now uses the sessionId passed into the function instead of crashing
 function buildPromptPayload(messages: Message[], latestUserText: string, sessionId: string): string {
   const systemNote = `\n\n[SYSTEM NOTE: IF you are drafting an invoice, the invoice_number for this session is ${sessionId}. Ignore this ID if the user is logging an expense or asking for a report.]`;
   
@@ -62,6 +62,9 @@ function formatYAxisValue(value: number) {
 }
 
 export default function InvoiceGeneratorPage() {
+  // 👇 Pull the dynamic firmId and loading state from Zustand
+  const { firmId, isLoading: isFirmLoading } = useFirmStore();
+
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [status, setStatus] = useState<Status>("idle");
@@ -73,14 +76,14 @@ export default function InvoiceGeneratorPage() {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const isLoading = status === "thinking" || status === "rendering";
 
-const handleDownloadDashboard = async (elementId: string) => {
+  const handleDownloadDashboard = async (elementId: string) => {
     const element = document.getElementById(elementId);
     if (!element) return;
 
     try {
       const canvas = await html2canvas(element, { 
-        scale: 2, // Doubles the resolution for crisp text
-        backgroundColor: "#ffffff", // Ensures the background isn't transparent/black
+        scale: 2,
+        backgroundColor: "#ffffff",
         useCORS: true 
       });
       
@@ -94,32 +97,35 @@ const handleDownloadDashboard = async (elementId: string) => {
     }
   };
 
-  // 👇 FIXED: This is now a clean, dedicated fetch function
-  const fetchNewInvoiceId = async () => {
+  // 👇 Wrapped in useCallback and injected dynamic firmId into the URL
+  const fetchNewInvoiceId = useCallback(async () => {
+    if (!firmId) return; // Guard clause to wait for the ID
     try {
-      const res = await fetch("http://127.0.0.1:8000/api/get-next-invoice-id");
+      const res = await fetch(`http://127.0.0.1:8000/api/firms/${firmId}/get-next-invoice-id`);
       const data = await res.json();
       if (data.invoice_id) {
-        // Update the ref to ensure we always have the freshest ID!
         invoiceIdRef.current = data.invoice_id;
       }
     } catch (err) {
       console.error("Failed to fetch ID", err);
     }
-  };
+  }, [firmId]);
 
   useEffect(() => {
     chatBottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, status]);
 
+  // 👇 Wait for firmId to load before fetching the invoice ID
   useEffect(() => {
-    inputRef.current?.focus();
-    fetchNewInvoiceId();
-  }, []);
+    if (firmId) {
+      inputRef.current?.focus();
+      fetchNewInvoiceId();
+    }
+  }, [firmId, fetchNewInvoiceId]);
 
   const handleSend = async () => {
     const text = input.trim();
-    if (!text || isLoading) return;
+    if (!text || isLoading || !firmId) return;
     
     const userMsg: Message = { id: uid(), role: "user", text };
     const previousMessages = [...messages];
@@ -131,12 +137,12 @@ const handleDownloadDashboard = async (elementId: string) => {
 
     if (inputRef.current) inputRef.current.style.height = "44px";
 
-    // 👇 FIXED: Pass the current value of the ref into the payload builder
     const promptPayload = buildPromptPayload(previousMessages, text, invoiceIdRef.current);
 
     try {
+      // 👇 Injected dynamic firmId into the URL here as well
       const response = await fetch(
-        "http://127.0.0.1:8000/api/prompt-to-invoice",
+        `http://127.0.0.1:8000/api/firms/${firmId}/prompt-to-invoice`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -177,7 +183,6 @@ const handleDownloadDashboard = async (elementId: string) => {
         }
 
       } else if (contentType.includes("application/pdf")) {
-        // 👇 FIXED: The PDF logic belongs here in handleSend
         const emailSentTo = response.headers.get("X-Email-Status");
         
         const blob = await response.blob();
@@ -200,7 +205,6 @@ const handleDownloadDashboard = async (elementId: string) => {
         setMessages((prev) => [...prev, aiMsg]);
         setStatus("idle");
         
-        // 👇 NEW: Fetch a fresh ID in the background now that this invoice is done! 👇
         fetchNewInvoiceId(); 
         
       } else {
@@ -231,11 +235,36 @@ const handleDownloadDashboard = async (elementId: string) => {
     setTimeout(() => inputRef.current?.focus(), 50);
   };
 
+  // 👇 Show a loading screen while Zustand connects to Supabase
+  if (isFirmLoading) {
+    return (
+      <div className="min-h-screen w-full flex justify-center items-center bg-[#F7F7F5]">
+        <Loader2 className="h-8 w-8 animate-spin text-[#1f3864]" />
+      </div>
+    );
+  }
+
+  // 👇 Fallback if user somehow lands here without being logged in
+  if (!firmId) {
+    return (
+      <div className="min-h-screen w-full flex flex-col justify-center items-center bg-[#F7F7F5] gap-4">
+        <AlertCircle className="h-10 w-10 text-red-500" />
+        <h2 className="text-xl font-semibold text-[#1a1a1a]">Authentication Required</h2>
+        <p className="text-sm text-[#6b7280]">Please log in to access your ledger.</p>
+        <Link 
+          href="/login"
+          className="mt-2 px-5 py-2.5 bg-[#1f3864] text-white rounded-lg text-sm font-medium hover:bg-[#162b50] transition-colors"
+        >
+          Go to Login
+        </Link>
+      </div>
+    );
+  }
+
   return (
     <main className="min-h-screen bg-[#F7F7F5] flex flex-col items-center justify-center px-4 py-10 font-sans">
      <div className="mb-6 text-center relative w-full max-w-4xl">
         
-        {/* The New Settings Button in the top right */}
         <div className="absolute right-0 top-0">
           <Link 
             href="/settings"
@@ -310,10 +339,8 @@ const handleDownloadDashboard = async (elementId: string) => {
               >
                 {msg.text}
                 
-                {/* 👇 TRULY DYNAMIC GENERATIVE AI DASHBOARD 👇 */}
                 {msg.dashboardData && (
                   <div className="mt-5 w-full">
-                    {/* The Header with the Download Button */}
                     <div className="flex justify-between items-center mb-4 px-1">
                       <span className="text-xs font-semibold text-[#1f3864] uppercase tracking-widest opacity-80">
                         Financial Analysis
@@ -327,7 +354,6 @@ const handleDownloadDashboard = async (elementId: string) => {
                       </button>
                     </div>
 
-                    {/* The Container we take a snapshot of. Note the dynamic ID! */}
                     <div 
                       id={`dashboard-${msg.id}`} 
                       className="space-y-6 w-full bg-[#f9fafb] p-4 rounded-xl border border-[#e5e7eb]"
