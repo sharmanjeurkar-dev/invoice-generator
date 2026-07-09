@@ -18,8 +18,6 @@ console.log(process.env.NEXT_PUBLIC_SUPABASE_URL)
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-// const SUPABASE_URL = "https://vytpzppooltcxjvvpzyk.supabase.co";
-// const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ5dHB6cHBvb2x0Y3hqdnZwenlrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODMwNzEwMDQsImV4cCI6MjA5ODY0NzAwNH0.kdXBqjniFMgiT-P5kJVXHI5iLYCwdIs6xmnLpoRK2qI";
 
 const supabase = createClient(SUPABASE_URL as string, SUPABASE_ANON_KEY as string);
 
