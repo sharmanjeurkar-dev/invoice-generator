@@ -7,7 +7,7 @@ import {
 } from 'recharts';
 import html2canvas from 'html2canvas';
 import Link from 'next/link';
-import { useFirmStore } from "../../store/useFirmStore"; // 👇 Added Zustand Store
+import { useFirmStore } from "../../store/useFirmStore";
 import {
   Scale,
   Send,
@@ -34,10 +34,6 @@ interface Message {
 
 type Status = "idle" | "thinking" | "rendering" | "success" | "error";
 
-function generateInvoiceId() {
-  return `INV-${Math.floor(1000 + Math.random() * 9000)}`; 
-}
-
 function buildPromptPayload(messages: Message[], latestUserText: string, sessionId: string): string {
   const systemNote = `\n\n[SYSTEM NOTE: IF you are drafting an invoice, the invoice_number for this session is ${sessionId}. Ignore this ID if the user is logging an expense or asking for a report.]`;
   
@@ -62,8 +58,7 @@ function formatYAxisValue(value: number) {
 }
 
 export default function InvoiceGeneratorPage() {
-  // 👇 Pull the dynamic firmId and loading state from Zustand
-  const { firmId, isLoading: isFirmLoading } = useFirmStore();
+  const { firmId, userId, isLoading: isFirmLoading } = useFirmStore();
 
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
@@ -97,9 +92,8 @@ export default function InvoiceGeneratorPage() {
     }
   };
 
-  // 👇 Wrapped in useCallback and injected dynamic firmId into the URL
   const fetchNewInvoiceId = useCallback(async () => {
-    if (!firmId) return; // Guard clause to wait for the ID
+    if (!firmId) return; 
     try {
       const res = await fetch(`http://127.0.0.1:8000/api/firms/${firmId}/get-next-invoice-id`);
       const data = await res.json();
@@ -107,7 +101,7 @@ export default function InvoiceGeneratorPage() {
         invoiceIdRef.current = data.invoice_id;
       }
     } catch (err) {
-      console.error("Failed to fetch ID", err);
+      console.error("Failed to fetch ID", err); 
     }
   }, [firmId]);
 
@@ -115,7 +109,6 @@ export default function InvoiceGeneratorPage() {
     chatBottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, status]);
 
-  // 👇 Wait for firmId to load before fetching the invoice ID
   useEffect(() => {
     if (firmId) {
       inputRef.current?.focus();
@@ -140,13 +133,15 @@ export default function InvoiceGeneratorPage() {
     const promptPayload = buildPromptPayload(previousMessages, text, invoiceIdRef.current);
 
     try {
-      // 👇 Injected dynamic firmId into the URL here as well
       const response = await fetch(
         `http://127.0.0.1:8000/api/firms/${firmId}/prompt-to-invoice`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ prompt: promptPayload }),
+          body: JSON.stringify({ 
+            prompt: promptPayload,
+            user_id: userId  
+          }),
         }
       );
 
@@ -185,10 +180,19 @@ export default function InvoiceGeneratorPage() {
       } else if (contentType.includes("application/pdf")) {
         const emailSentTo = response.headers.get("X-Email-Status");
         
+        let filename = `invoice_${Date.now()}.pdf`; 
+        const contentDisposition = response.headers.get("Content-Disposition");
+        
+        if (contentDisposition) {
+          const match = contentDisposition.match(/filename="?([^"]+)"?/);
+          if (match && match[1]) {
+            filename = match[1];
+          }
+        }
+        
         const blob = await response.blob();
         const url = URL.createObjectURL(blob);
-        const filename = `invoice_${Date.now()}.pdf`;
-        
+       
         let finalMessage = "I have successfully generated your invoice! You can download it below.";
         if (emailSentTo) {
           finalMessage = `I have successfully generated your invoice! A copy has also been securely emailed to ${emailSentTo}. You can download your local copy below.`;
@@ -235,7 +239,6 @@ export default function InvoiceGeneratorPage() {
     setTimeout(() => inputRef.current?.focus(), 50);
   };
 
-  // 👇 Show a loading screen while Zustand connects to Supabase
   if (isFirmLoading) {
     return (
       <div className="min-h-screen w-full flex justify-center items-center bg-[#F7F7F5]">
@@ -244,7 +247,6 @@ export default function InvoiceGeneratorPage() {
     );
   }
 
-  // 👇 Fallback if user somehow lands here without being logged in
   if (!firmId) {
     return (
       <div className="min-h-screen w-full flex flex-col justify-center items-center bg-[#F7F7F5] gap-4">

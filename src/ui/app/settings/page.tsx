@@ -81,6 +81,10 @@ export default function SettingsPage() {
     ifsc_code: "",
     email_sender: "", 
     logo_url: "",
+    pan_number: "",
+    contact_number: "",
+    contact_email: "",
+    bank_branch: "",
   });
 
   const [loadingSettings, setLoadingSettings] = useState(true);
@@ -273,6 +277,31 @@ export default function SettingsPage() {
                     placeholder="MG Road, Bengaluru 560001"
                   />
                 </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <Field
+                    label="Contact Email"
+                    name="contact_email"
+                    type="email"
+                    value={form.contact_email}
+                    onChange={handleChange}
+                    placeholder="contact@pentacleslegal.com"
+                  />
+                  <Field
+                    label="Contact Number"
+                    name="contact_number"
+                    value={form.contact_number}
+                    onChange={handleChange}
+                    placeholder="+91 98765 43210"
+                  />
+                </div>
+                <Field
+                  label="PAN Number"
+                  name="pan_number"
+                  value={form.pan_number}
+                  onChange={handleChange}
+                  placeholder="ABCDE1234F"
+                />
+
               </div>
             </section>
 
@@ -292,6 +321,13 @@ export default function SettingsPage() {
                   value={form.bank_name}
                   onChange={handleChange}
                   placeholder="HDFC Bank"
+                />
+                <Field
+                  label="Bank Branch Location"
+                  name="bank_branch"
+                  value={form.bank_branch}
+                  onChange={handleChange}
+                  placeholder="MG Road Branch, Bengaluru"
                 />
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <Field

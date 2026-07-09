@@ -17,7 +17,7 @@ from src.document.Pdf_generator import generate_invoice_pdf
 from tests.test_baseline_inference import generate_json_for_inbvoice_from_prompt
 
 
-# invice
+# invoice
 class AddressModel(BaseModel):
     line1: str
     line2: Optional[str] = None
@@ -31,7 +31,7 @@ class ClientModel(BaseModel):
 
 
 class ServiceModel(BaseModel):
-    category: str = "Legal Professional Fees"  # Typo fixed
+    category: str = "Legal Professional Fees"
     details: str
     qty: int = 1
     amount: float
@@ -50,6 +50,7 @@ class InvoicePayloadModel(BaseModel):
 
 class PromptRequestModel(BaseModel):
     prompt: str
+    user_id: str  # 👈 Added user_id to accept it from the frontend
 
 
 # Firm settings
@@ -62,6 +63,10 @@ class FirmSettings(BaseModel):
     account_number: Optional[str] = None
     ifsc_code: Optional[str] = None
     logo_url: Optional[str] = None
+    pan_number: Optional[str] = None
+    contact_number: Optional[str] = None
+    contact_email: Optional[str] = None
+    bank_branch: Optional[str] = None
 
 
 app = FastAPI(
@@ -80,7 +85,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["X-Email-Status"],
+    expose_headers=["X-Email-Status,Content-Disposition"],
 )
 
 load_dotenv()
@@ -112,15 +117,17 @@ async def prompt_to_invoice_generator(firm_id: str, response: PromptRequestModel
     invoice_id = str(uuid.uuid4())[:8]
     expense_id = str(uuid.uuid4())[:8]
     prompt = str(response.prompt)
+    user_id = response.user_id  # 👈 Extract the user_id securely
 
     client_directory_text = ""
     try:
         conn = psycopg2.connect(DB_URL)
         cursor = conn.cursor()
 
-        # Adjust 'clients' and the column names based on your actual Supabase table!
+        # 👈 Added firm_id isolation to the client lookup!
         cursor.execute(
-            "SELECT name, address_line1, address_line2 FROM clients LIMIT 50;"
+            "SELECT name, address_line1, address_line2 FROM clients WHERE firm_id = %s::uuid LIMIT 50;",
+            (firm_id,),
         )
         clients = cursor.fetchall()
 
@@ -135,19 +142,14 @@ async def prompt_to_invoice_generator(firm_id: str, response: PromptRequestModel
         cursor.close()
         conn.close()
     except Exception as e:
-        print(f"⚠️ Could not fetch client directory (Table might not exist yet): {e}")
-        pass  # Fail silently so the app doesn't crash if the table is empty
+        print(f"⚠️ Could not fetch client directory: {e}")
+        pass
 
-    # Glue the directory to the user's prompt!
     enriched_prompt = prompt + client_directory_text
     print("🧠 Sending prompt + client directory to Pass 1...")
-    llm_response = generate_json_for_inbvoice_from_prompt(enriched_prompt)
 
-    action = llm_response.get("action")
-
-    print(f"📥 Received text prompt: {prompt}")
     try:
-        llm_response = generate_json_for_inbvoice_from_prompt(prompt)
+        llm_response = generate_json_for_inbvoice_from_prompt(enriched_prompt)
     except Exception as e:
         print(f"LLM Error: {e}")
         raise HTTPException(status_code=500, detail="failed to generate Ai response")
@@ -157,14 +159,16 @@ async def prompt_to_invoice_generator(firm_id: str, response: PromptRequestModel
         return JSONResponse(
             content={"status": "clarification", "message": llm_response["message"]}
         )
+
     ai_json = llm_response.get("data", {})
     if ai_json.get("status") == "clarification":
-        print("🟡 AI requested clarification (JSON). Sending back to UI.")
         return JSONResponse(
             content={"status": "clarification", "message": ai_json["message"]}
         )
+
     action = ai_json.get("action", "draft_invoice")
-    # DRAFT mode
+
+    # --- DRAFT INVOICE MODE ---
     if action == "draft_invoice":
         client_data = ai_json.get("client", {})
         address = client_data.get("address", {})
@@ -180,30 +184,35 @@ async def prompt_to_invoice_generator(firm_id: str, response: PromptRequestModel
                 }
             )
 
-        client_data = ai_json.get("client", {})
         client_name = client_data.get("name")
-        address = client_data.get("address", {})
         line1 = address.get("line1", "")
         line2 = address.get("line2", "")
         line3 = address.get("line3", "")
 
         if client_name and line1:
-            print(f"🔍 Checking if client '{client_name}' is in the directory...")
+            print(f"🔍 Auto-saving client '{client_name}' to directory...")
             try:
                 conn = psycopg2.connect(DB_URL)
                 cursor = conn.cursor()
 
-                # Using PostgreSQL 'ON CONFLICT DO NOTHING' to safely ignore duplicates
+                # 👈 Fixed query: Inserts into CLIENTS table instead of financials!
                 cursor.execute(
                     """
-                    INSERT INTO clients (name, address_line1, address_line2,address_line3) 
-                    VALUES (%s, %s, %s, %s) 
-                    ON CONFLICT (name) DO NOTHING;
-                """,
-                    (client_name, line1, line2, line3),
+                    INSERT INTO clients 
+                    (firm_id, created_by, name, address_line1, address_line2, address_line3) 
+                    VALUES (%s::uuid, %s::uuid, %s, %s, %s, %s)
+                    ON CONFLICT DO NOTHING;
+                    """,
+                    (
+                        firm_id,
+                        user_id,
+                        client_name,
+                        line1,
+                        line2,
+                        line3,
+                    ),
                 )
 
-                # If a new row was inserted, rowcount will be 1
                 if cursor.rowcount > 0:
                     print(f"✅ Successfully learned a new client: {client_name}!")
 
@@ -212,15 +221,13 @@ async def prompt_to_invoice_generator(firm_id: str, response: PromptRequestModel
                 conn.close()
             except Exception as e:
                 print(f"⚠️ Failed to auto-save client background task: {e}")
+
         print("✅ Validating AI output structure...")
         try:
             validating_payload = InvoicePayloadModel(**llm_response["data"])
         except Exception as e:
             print(f"Validation Error: {e}")
-            raise HTTPException(
-                status_code=500,
-                detail="Invalid format generated. Validation returned negative results.",
-            )
+            raise HTTPException(status_code=500, detail="Invalid format generated.")
 
         invoice_dict = validating_payload.model_dump()
         inv_name = invoice_dict["client"]["name"]
@@ -229,7 +236,8 @@ async def prompt_to_invoice_generator(firm_id: str, response: PromptRequestModel
         for key in ["line1", "line2", "line3"]:
             if address_data.get(key) is None:
                 address_data[key] = ""
-        print("🖨️  Sending AI data to Playwright engine background thread...")
+
+        print("🖨️  Sending AI data to Playwright engine...")
 
         try:
             await anyio.to_thread.run_sync(
@@ -253,8 +261,6 @@ async def prompt_to_invoice_generator(firm_id: str, response: PromptRequestModel
         if invoice_dict["client"].get("email"):
             target_email = invoice_dict["client"]["email"]
             client_name = invoice_dict["client"]["name"]
-            print(f"🔌 Initializing MCP Connection for {target_email}...")
-
             server_params = StdioServerParameters(
                 command="python", args=["src/intelligence/tools/email_mcp_service.py"]
             )
@@ -263,7 +269,6 @@ async def prompt_to_invoice_generator(firm_id: str, response: PromptRequestModel
                 async with stdio_client(server_params) as (read, write):
                     async with ClientSession(read, write) as session:
                         await session.initialize()
-                        print("🛠️  Triggering 'send_invoice_email' tool...")
                         result = await session.call_tool(
                             "send_invoice_on_email",
                             arguments={
@@ -272,12 +277,10 @@ async def prompt_to_invoice_generator(firm_id: str, response: PromptRequestModel
                                 "client_name": client_name,
                             },
                         )
-                        print(f"📬 MCP Server Response: {result.content[0].text}")
                         email_status_msg = target_email
             except Exception as e:
                 print(f"⚠️ MCP Connection Failed: {e}")
 
-        print(f"📤 Returning {output_filename} to the client.")
         header = {}
         if email_status_msg:
             header["X-Email-Status"] = email_status_msg
@@ -296,11 +299,12 @@ async def prompt_to_invoice_generator(firm_id: str, response: PromptRequestModel
 
             invoice_id = invoice_dict.get("invoice_number", "INV-UNKNOWN")
 
+            # 👈 Injected firm_id and created_by into the financial record
             cursor.execute(
                 """
                 INSERT INTO firm_financials 
-                (transaction_type, amount, party_name, reference_file, description, invoice_id) 
-                VALUES (%s, %s, %s, %s, %s, %s)
+                (firm_id, created_by, transaction_type, amount, party_name, reference_file, description, invoice_id, created_at) 
+                VALUES (%s::uuid, %s::uuid, %s, %s, %s, %s, %s, %s, NOW())
                 ON CONFLICT (invoice_id) 
                 DO UPDATE SET 
                     amount = EXCLUDED.amount,
@@ -309,6 +313,8 @@ async def prompt_to_invoice_generator(firm_id: str, response: PromptRequestModel
                     created_at = CURRENT_TIMESTAMP;
                 """,
                 (
+                    firm_id,
+                    user_id,
                     "EARNING",
                     safe_total,
                     invoice_dict["client"]["name"],
@@ -323,9 +329,9 @@ async def prompt_to_invoice_generator(firm_id: str, response: PromptRequestModel
             print(f"✅ PostgreSQL record {invoice_id} upserted successfully!")
         except Exception as e:
             print(f"⚠️ Database Error: {e}")
+
         client_email = invoice_dict["client"].get("email")
         if client_email:
-            print(f"📧 Email was sent to {client_email}. Returning success message.")
             return {
                 "status": "success",
                 "message": f"Invoice {invoice_id} successfully finalized and emailed to {client_email}.",
@@ -334,7 +340,7 @@ async def prompt_to_invoice_generator(firm_id: str, response: PromptRequestModel
             path=file_path, filename=output_filename, media_type="application/pdf"
         )
 
-    # LOG_EXPENSE Mode
+    # --- LOG_EXPENSE MODE ---
     elif action == "log_expense":
         conn = psycopg2.connect(DB_URL)
         cursor = conn.cursor()
@@ -342,16 +348,19 @@ async def prompt_to_invoice_generator(firm_id: str, response: PromptRequestModel
         cursor.execute("SELECT nextval('expense_number_seq');")
         next_val = cursor.fetchone()[0]
         expense_id = f"EXP-{next_val}"
-        print(f"🏷️ Generated sequential ID: {expense_id}")
 
         print("💾 Logging EXPENSE to PostgreSQL...")
+
+        # 👈 Injected firm_id and created_by into the financial record
         cursor.execute(
             """
                 INSERT INTO firm_financials(
-                transaction_type, amount, party_name, description,invoice_id) 
-                VALUES (%s, %s, %s, %s, %s)
+                firm_id, created_by, transaction_type, amount, party_name, description, invoice_id, created_at) 
+                VALUES (%s::uuid, %s::uuid, %s, %s, %s, %s, %s, NOW())
                 """,
             (
+                firm_id,
+                user_id,
                 "EXPENSE",
                 float(ai_json.get("amount", 0.0)),
                 ai_json.get("vendor_name", "Unknown Vendor"),
@@ -366,43 +375,55 @@ async def prompt_to_invoice_generator(firm_id: str, response: PromptRequestModel
             "message": f"Successfully logged an expense of ₹{ai_json['amount']} to {ai_json['vendor_name']}.",
         }
 
-    # REPORT_GENERATION Mode
+    # --- REPORT_GENERATION MODE ---
     elif action == "analyze_financials":
         print("📊 Generating Financial Report...")
         try:
             conn = psycopg2.connect(DB_URL)
             cursor = conn.cursor()
 
-            timeframe = ai_json.get("timeframe", "all")
-
-            cursor.execute("""
-                SELECT TO_CHAR(created_at, 'Mon YYYY'), transaction_type, SUM(amount) 
+            # 👈 Locked down to firm_id
+            cursor.execute(
+                """
+                SELECT transaction_type, amount, party_name, created_at 
                 FROM firm_financials 
-                GROUP BY 1, 2 ORDER BY MIN(created_at) DESC;
-            """)
+                WHERE firm_id = %s::uuid 
+                ORDER BY created_at DESC;
+                """,
+                (firm_id,),
+            )
             time_rows = cursor.fetchall()
 
-            cursor.execute("""
+            # 👈 Locked down to firm_id
+            cursor.execute(
+                """
                 SELECT TO_CHAR(created_at, 'Mon YYYY'), COALESCE(party_name, 'Unknown'), SUM(amount) 
                 FROM firm_financials 
-                WHERE transaction_type = 'EARNING' 
+                WHERE firm_id = %s::uuid AND transaction_type = 'EARNING' 
                 GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 50;
-            """)
+            """,
+                (firm_id,),
+            )
             client_rows = cursor.fetchall()
 
-            cursor.execute("""
+            # 👈 Locked down to firm_id
+            cursor.execute(
+                """
                 SELECT TO_CHAR(created_at, 'Mon YYYY'), COALESCE(party_name, 'General/Unknown'), SUM(amount) 
                 FROM firm_financials 
-                WHERE transaction_type = 'EXPENSE' 
+                WHERE firm_id = %s::uuid AND transaction_type = 'EXPENSE' 
                 GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 50;
-            """)
+            """,
+                (firm_id,),
+            )
             expense_rows = cursor.fetchall()
+
             cursor.close()
             conn.close()
 
             data_string = (
                 "--- OVERALL MONTHLY TRENDS ---\n"
-                + " | ".join([f"{r[0]}: {r[1]} ₹{r[2]}" for r in time_rows])
+                + " | ".join([f"{r[0]}: {r[2]} ₹{r[1]}" for r in time_rows])
                 + "\n\n"
                 + "--- EARNINGS BY CLIENT (Per Month) ---\n"
                 + " | ".join([f"{r[0]} - {r[1]}: ₹{r[2]}" for r in client_rows])
@@ -422,16 +443,14 @@ async def prompt_to_invoice_generator(firm_id: str, response: PromptRequestModel
             second_llm_response = generate_json_for_inbvoice_from_prompt(analyst_prompt)
 
             if second_llm_response.get("status") == "clarification":
-                print("⚠️ AI failed to format the dashboard JSON correctly.")
                 return JSONResponse(
                     content={
                         "status": "error",
-                        "message": "The AI generated the insights but failed to format the dashboard correctly. Please try asking for fewer charts at a time.",
+                        "message": "The AI generated the insights but failed to format the dashboard correctly.",
                     }
                 )
 
             dashboard_json = second_llm_response.get("data", {})
-
             if "executive_summary" not in dashboard_json:
                 dashboard_json["executive_summary"] = (
                     "Here is your requested financial dashboard."
@@ -472,12 +491,11 @@ async def update_settings(firm_id: str, settings: FirmSettings):
         conn = psycopg2.connect(DB_URL)
         cursor = conn.cursor()
 
-        # Inject the dynamic firm_id into the UPSERT statement
         cursor.execute(
             """
             INSERT INTO firm_settings 
-            (id, firm_name, address_line1, address_line2, email_sender, bank_name, account_number, ifsc_code, logo_url, updated_at) 
-            VALUES (%s::uuid, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+            (id, firm_name, address_line1, address_line2, email_sender, bank_name, account_number, ifsc_code, logo_url, pan_number, contact_number, contact_email, bank_branch, updated_at) 
+            VALUES (%s::uuid, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
             ON CONFLICT (id) DO UPDATE SET 
                 firm_name = EXCLUDED.firm_name,
                 address_line1 = EXCLUDED.address_line1,
@@ -487,10 +505,14 @@ async def update_settings(firm_id: str, settings: FirmSettings):
                 account_number = EXCLUDED.account_number,
                 ifsc_code = EXCLUDED.ifsc_code,
                 logo_url = EXCLUDED.logo_url,
+                pan_number = EXCLUDED.pan_number,
+                contact_number = EXCLUDED.contact_number,
+                contact_email = EXCLUDED.contact_email,
+                bank_branch = EXCLUDED.bank_branch,
                 updated_at = NOW();
         """,
             (
-                firm_id,  # <--- Dynamic ID inserted here
+                firm_id,
                 settings.firm_name,
                 settings.address_line1,
                 settings.address_line2,
@@ -499,6 +521,10 @@ async def update_settings(firm_id: str, settings: FirmSettings):
                 settings.account_number,
                 settings.ifsc_code,
                 settings.logo_url,
+                settings.pan_number,
+                settings.contact_number,
+                settings.contact_email,
+                settings.bank_branch,
             ),
         )
 

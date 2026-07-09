@@ -2,12 +2,13 @@
 
 import { useState } from "react";
 import { supabase } from "../lib/supabaseClient"; // Adjust path if your lib is elsewhere
-import { Mail, Lock, Loader2 } from "lucide-react";
+import { Scale, Mail, Lock, Loader2, Eye, EyeOff } from "lucide-react";
 
 export default function LoginPage() {
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
   const [successMsg, setSuccessMsg] = useState("");
@@ -20,27 +21,13 @@ export default function LoginPage() {
 
     try {
       if (isLogin) {
-        // --- LOGIN FLOW (Existing Users) ---
-        const { error } = await supabase.auth.signInWithPassword({
-          email,
-          password,
-        });
+        const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
-        
-        // They already have an account, send them straight to the agent!
-        window.location.href = "/agent"; 
-        
+        window.location.href = "/agent";
       } else {
-        // --- REGISTRATION FLOW (Brand New Users) ---
-        const { error } = await supabase.auth.signUp({
-          email,
-          password,
-        });
+        const { error } = await supabase.auth.signUp({ email, password });
         if (error) throw error;
-        
-        // They are brand new and instantly logged in. 
-        // Send them straight to settings to complete their firm profile!
-        window.location.href = "/settings"; 
+        window.location.href = "/settings";
       }
     } catch (err: any) {
       setErrorMsg(err.message || "Authentication failed.");
@@ -49,67 +36,159 @@ export default function LoginPage() {
     }
   };
 
+  // Palette — matched to the rest of the app
+  // Background   #F5F4F0  warm off-white
+  // Card         #FFFFFF
+  // Ink          #1A1A1A  headings / primary text
+  // Slate accent #47597A  brand label, icon, links, focus
+  // Muted text   #6B7280
+  // Border       #E5E7EB
+  // Input fill   #F8F8F6
+
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
-      <div className="max-w-md w-full bg-white rounded-xl shadow-lg p-8 border border-gray-100">
-        <h2 className="text-2xl font-bold text-center mb-6" style={{ color: "#1f3864" }}>
-          {isLogin ? "Welcome Back" : "Register Your Firm"}
-        </h2>
+    <div
+      className="min-h-screen w-full flex flex-col items-center justify-center p-6"
+      style={{ backgroundColor: "#F5F4F0" }}
+    >
+      <style>{`
+        .field-input {
+          background-color: #F8F8F6;
+          border: 1px solid #E5E7EB;
+          transition: border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
+        }
+        .field-input:focus {
+          outline: none;
+          background-color: #FFFFFF;
+          border-color: #47597A;
+          box-shadow: 0 0 0 3px rgba(71, 89, 122, 0.12);
+        }
+      `}</style>
+
+      {/* Brand mark */}
+      <div className="flex justify-center mb-8">
+        <Scale className="h-[28px] w-[28px]" style={{ color: "#47597A" }} strokeWidth={2} />
+      </div>
+
+      {/* Card */}
+      <div
+        className="w-full max-w-[420px] rounded-2xl p-8 sm:p-9"
+        style={{
+          backgroundColor: "#FFFFFF",
+          border: "1px solid #ECEBE7",
+          boxShadow: "0 1px 2px rgba(0,0,0,0.03), 0 12px 32px -12px rgba(20,20,20,0.08)",
+        }}
+      >
+        <div className="mb-7">
+          <h2 className="text-[22px] font-semibold tracking-tight mb-1.5" style={{ color: "#1A1A1A" }}>
+            {isLogin ? "Welcome back" : "Register your firm"}
+          </h2>
+          <p className="text-[13.5px]" style={{ color: "#6B7280" }}>
+            {isLogin
+              ? "Sign in to access your firm's workspace."
+              : "Set up your firm's account in under a minute."}
+          </p>
+        </div>
 
         {errorMsg && (
-          <div className="mb-4 p-3 bg-red-50 text-red-700 text-sm rounded-md border border-red-200">
+          <div
+            className="mb-5 px-3.5 py-2.5 text-[13px] rounded-lg"
+            style={{ backgroundColor: "#FBEEEE", color: "#9B4040", border: "1px solid #F0DADA" }}
+          >
             {errorMsg}
           </div>
         )}
-
         {successMsg && (
-          <div className="mb-4 p-3 bg-green-50 text-green-700 text-sm rounded-md border border-green-200">
+          <div
+            className="mb-5 px-3.5 py-2.5 text-[13px] rounded-lg"
+            style={{ backgroundColor: "#EDF2EF", color: "#3F6B54", border: "1px solid #DAE6DE" }}
+          >
             {successMsg}
           </div>
         )}
 
-        <form onSubmit={handleAuth} className="space-y-5">
+        <form onSubmit={handleAuth} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Email Address</label>
+            <label className="block text-[13px] font-medium mb-1.5" style={{ color: "#374151" }}>
+              Email address
+            </label>
             <div className="relative">
-              <Mail className="absolute left-3 top-2.5 h-5 w-5 text-gray-400" />
+              <Mail
+                className="absolute left-3.5 top-1/2 -translate-y-1/2 h-[16px] w-[16px]"
+                style={{ color: "#9CA3AF" }}
+              />
               <input
                 type="email"
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="w-full pl-10 pr-4 py-2 border rounded-md focus:ring-2 focus:ring-[#1f3864] focus:border-transparent outline-none"
+                className="field-input w-full rounded-lg pl-10 pr-3.5 py-2.5 text-[14px]"
+                style={{ color: "#1A1A1A" }}
                 placeholder="admin@firm.com"
               />
             </div>
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="block text-[13px] font-medium" style={{ color: "#374151" }}>
+                Password
+              </label>
+              {isLogin && (
+                <button
+                  type="button"
+                  className="text-[12px] font-medium hover:underline"
+                  style={{ color: "#47597A" }}
+                >
+                  Forgot password?
+                </button>
+              )}
+            </div>
             <div className="relative">
-              <Lock className="absolute left-3 top-2.5 h-5 w-5 text-gray-400" />
+              <Lock
+                className="absolute left-3.5 top-1/2 -translate-y-1/2 h-[16px] w-[16px]"
+                style={{ color: "#9CA3AF" }}
+              />
               <input
-                type="password"
+                type={showPassword ? "text" : "password"}
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full pl-10 pr-4 py-2 border rounded-md focus:ring-2 focus:ring-[#1f3864] focus:border-transparent outline-none"
+                className="field-input w-full rounded-lg pl-10 pr-10 py-2.5 text-[14px]"
+                style={{ color: "#1A1A1A" }}
                 placeholder="••••••••"
               />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                className="absolute right-3.5 top-1/2 -translate-y-1/2"
+                style={{ color: "#9CA3AF" }}
+                tabIndex={-1}
+              >
+                {showPassword ? <EyeOff className="h-[16px] w-[16px]" /> : <Eye className="h-[16px] w-[16px]" />}
+              </button>
             </div>
           </div>
 
           <button
             type="submit"
             disabled={loading}
-            className="w-full text-white py-2.5 rounded-md hover:opacity-90 transition-opacity flex items-center justify-center font-medium"
-            style={{ backgroundColor: "#1f3864" }}
+            className="w-full py-2.5 rounded-lg transition-all duration-150 flex items-center justify-center font-medium text-[14px] shadow-sm hover:shadow-md active:scale-[0.99] disabled:opacity-70 disabled:cursor-not-allowed mt-1"
+            style={{ backgroundColor: "#47597A", color: "#FFFFFF" }}
+            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#3B4A66")}
+            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#47597A")}
           >
-            {loading ? <Loader2 className="animate-spin h-5 w-5" /> : (isLogin ? "Sign In" : "Create Account")}
+            {loading ? (
+              <Loader2 className="animate-spin h-[17px] w-[17px]" />
+            ) : isLogin ? (
+              "Sign in"
+            ) : (
+              "Create account"
+            )}
           </button>
         </form>
 
-        <div className="mt-6 text-center">
+        <div className="mt-6 text-center text-[13px]" style={{ color: "#6B7280" }}>
+          {isLogin ? "Don't have an account? " : "Already have an account? "}
           <button
             type="button"
             onClick={() => {
@@ -117,13 +196,20 @@ export default function LoginPage() {
               setErrorMsg("");
               setSuccessMsg("");
             }}
-            className="text-sm font-medium hover:underline"
-            style={{ color: "#1f3864" }}
+            className="font-semibold hover:underline transition-colors"
+            style={{ color: "#47597A" }}
           >
-            {isLogin ? "Need to register your firm? Sign up" : "Already have an account? Sign in"}
+            {isLogin ? "Register your firm" : "Sign in"}
           </button>
         </div>
       </div>
+
+      <p
+        className="mt-7 text-[11px] tracking-[0.14em] uppercase"
+        style={{ color: "#9CA3AF" }}
+      >
+        Finance and accounting · AI-assisted tooling
+      </p>
     </div>
   );
 }
