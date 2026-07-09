@@ -20,24 +20,27 @@ export default function LoginPage() {
 
     try {
       if (isLogin) {
-        // --- LOGIN FLOW ---
+        // --- LOGIN FLOW (Existing Users) ---
         const { error } = await supabase.auth.signInWithPassword({
           email,
           password,
         });
         if (error) throw error;
         
-        window.location.href = "/settings"; // Redirect on success
+        // They already have an account, send them straight to the agent!
+        window.location.href = "/agent"; 
+        
       } else {
-        // --- REGISTRATION FLOW ---
+        // --- REGISTRATION FLOW (Brand New Users) ---
         const { error } = await supabase.auth.signUp({
           email,
           password,
         });
         if (error) throw error;
         
-        setSuccessMsg("Registration successful! You can now log in.");
-        setIsLogin(true); // Switch back to login view
+        // They are brand new and instantly logged in. 
+        // Send them straight to settings to complete their firm profile!
+        window.location.href = "/settings"; 
       }
     } catch (err: any) {
       setErrorMsg(err.message || "Authentication failed.");

@@ -133,18 +133,33 @@ export default function SettingsPage() {
 
   const handleLogoUpload = useCallback(async (e: any) => {
     const file = e.target.files?.[0];
-    if (!file) return;
+    if (!file || !firmId) return; // Safety check for the file and the firmId
 
     setUploading(true);
     setErrorMsg("");
 
     try {
+      
+      if (form.logo_url) {
+        // Grab just the filename from the very end of the Supabase public URL
+        const oldFileName = form.logo_url.split("/").pop();
+        
+        if (oldFileName) {
+          // Tell Supabase to permanently delete this specific file from the bucket
+          await supabase.storage.from("Logos").remove([oldFileName]);
+        }
+      }
+
+      // 👇 2. UPLOAD THE NEW LOGO
       const fileExt = file.name.split(".").pop();
-      const fileName = `logo-${Date.now()}.${fileExt}`;
+      // Bonus: Add the firmId to the filename so your bucket stays highly organized!
+      const fileName = `firm-${firmId}-${Date.now()}.${fileExt}`;
 
       const { error: uploadError } = await supabase.storage
         .from("Logos")
-        .upload(fileName, file);
+        .upload(fileName, file, {
+          upsert: true // Ensures it overwrites gracefully
+        });
 
       if (uploadError) throw uploadError;
 
@@ -159,7 +174,7 @@ export default function SettingsPage() {
     } finally {
       setUploading(false);
     }
-  }, []);
+  }, [form.logo_url, firmId]); 
 
   const handleSave = useCallback(async () => {
     if (!firmId) {
