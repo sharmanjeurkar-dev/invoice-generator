@@ -72,7 +72,7 @@ class FirmSettings(BaseModel):
 
 
 app = FastAPI(
-    title="Pentacles Legal firm",
+    title="Ledger",
     description="Internal microservice for invoice generator",
 )
 
@@ -343,6 +343,10 @@ async def prompt_to_invoice_generator(firm_id: str, response: PromptRequestModel
         if invoice_dict["client"].get("email"):
             target_email = invoice_dict["client"]["email"]
             client_name = invoice_dict["client"]["name"]
+
+            # 👇 1. Extract the sender's email from the firm_data you fetched earlier
+            sender_email = firm_data.get("email_sender")
+
             server_params = StdioServerParameters(
                 command="python", args=["src/intelligence/tools/email_mcp_service.py"]
             )
@@ -357,6 +361,7 @@ async def prompt_to_invoice_generator(firm_id: str, response: PromptRequestModel
                                 "target_email": target_email,
                                 "pdf_file_path": file_path,
                                 "client_name": client_name,
+                                "sender_email": sender_email,
                             },
                         )
                         email_status_msg = target_email

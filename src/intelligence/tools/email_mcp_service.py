@@ -12,9 +12,9 @@ load_dotenv()
 
 @mcp.tool()
 def send_invoice_on_email(
-    target_email: str, pdf_file_path: str, client_name: str
+    target_email: str, pdf_file_path: str, client_name: str, sender_email: str
 ) -> str:
-    sender_email = os.getenv("SENDER_EMAIL")
+    # sender_email = os.getenv("SENDER_EMAIL")
     app_password = os.getenv("APP_PASSWORD")
 
     if not os.path.exists(pdf_file_path):
