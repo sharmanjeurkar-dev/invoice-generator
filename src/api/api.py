@@ -390,6 +390,7 @@ async def prompt_to_invoice_generator(firm_id: str, response: PromptRequestModel
                 DO UPDATE SET 
                     amount = EXCLUDED.amount,
                     description = EXCLUDED.description,
+                    created_by = EXCLUDED.created_by,
                     reference_file = EXCLUDED.reference_file,
                     created_at = CURRENT_TIMESTAMP;
                 """,
