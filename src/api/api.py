@@ -1,4 +1,5 @@
 import os
+import re
 import uuid
 from typing import List, Optional
 
@@ -44,7 +45,7 @@ class InvoicePayloadModel(BaseModel):
     client: ClientModel
     services: List[ServiceModel]
     subtotal: float
-    gst: Optional[float] = None
+    gst: Optional[float] = 0
     total: float
 
 
@@ -85,7 +86,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["X-Email-Status,Content-Disposition"],
+    expose_headers=["X-Email-Status", "Content-Disposition"],
 )
 
 load_dotenv()
@@ -100,14 +101,34 @@ def get_next_invoice_id(firm_id: str):
         cursor = conn.cursor()
 
         # This securely pulls the next atomic number from Postgres
-        cursor.execute("SELECT nextval('invoice_number_seq');")
-        next_val = cursor.fetchone()[0]
+        cursor.execute(
+            "SELECT next_invoice_number, firm_name FROM firm_settings WHERE id = %s::uuid;",
+            (firm_id,),
+        )
+        result = cursor.fetchone()
+
+        if result:
+            next_val = result[0]
+            firm_name = result[1] or "INV"
+        else:
+            # Fallback if a brand new user hasn't saved their settings yet
+            next_val = 1
+            firm_name = "Unknown Firm"
 
         cursor.close()
         conn.close()
+        words = firm_name.strip().split()
+        if len(words) >= 2:
+            prefix = (words[0][0] + words[1][0]).upper()
+        elif len(words) == 1:
+            prefix = words[0][:3].upper()
+        else:
+            prefix = "INV"
 
-        # Formats it as INV-1000, INV-1001, etc.
-        return {"invoice_id": f"INV-{next_val}"}
+        formatted_number = str(next_val).zfill(3)
+
+        # Injects -INV- between the firm prefix and the number
+        return {"invoice_id": f"{prefix}-INV-{formatted_number}"}
     except Exception as e:
         return {"error": str(e)}
 
@@ -117,14 +138,13 @@ async def prompt_to_invoice_generator(firm_id: str, response: PromptRequestModel
     invoice_id = str(uuid.uuid4())[:8]
     expense_id = str(uuid.uuid4())[:8]
     prompt = str(response.prompt)
-    user_id = response.user_id  # 👈 Extract the user_id securely
+    user_id = response.user_id
 
     client_directory_text = ""
     try:
         conn = psycopg2.connect(DB_URL)
         cursor = conn.cursor()
 
-        # 👈 Added firm_id isolation to the client lookup!
         cursor.execute(
             "SELECT name, address_line1, address_line2 FROM clients WHERE firm_id = %s::uuid LIMIT 50;",
             (firm_id,),
@@ -132,10 +152,22 @@ async def prompt_to_invoice_generator(firm_id: str, response: PromptRequestModel
         clients = cursor.fetchall()
 
         if clients:
-            # Format the data into a clean string for the LLM
-            directory_list = [f"{c[0]}: {c[1]}, {c[2]}" for c in clients]
+            directory_list = []
+            for c in clients:
+                name = c[0]
+                # Filter out 'None' values so the AI doesn't get confused
+                l1 = c[1] if c[1] else ""
+                l2 = c[2] if c[2] else ""
+                full_addr = f"{l1}, {l2}".strip(", ")
+
+                if full_addr:
+                    directory_list.append(f"Client '{name}': {full_addr}")
+
             client_directory_text = (
                 "\n\n[SYSTEM NOTE: KNOWN CLIENT DIRECTORY]\n"
+                "CRITICAL INSTRUCTION: If the user requests an invoice for a client named below, "
+                "you MUST extract their address from this directory and populate the 'client.address' fields in your JSON. "
+                "DO NOT leave the address null or blank if the client is listed here!\n"
                 + "\n".join(directory_list)
             )
 
@@ -145,7 +177,11 @@ async def prompt_to_invoice_generator(firm_id: str, response: PromptRequestModel
         print(f"⚠️ Could not fetch client directory: {e}")
         pass
 
-    enriched_prompt = prompt + client_directory_text
+    email_enforcement = "\n\n[SYSTEM NOTE: If the user provides an email address anywhere in their request, you MUST extract it and place it in the 'client.email' field of your JSON response. Do not leave it null if an email is present.]"
+    financial_enforcement = "\n\n[CRITICAL INSTRUCTION: By default, set 'gst' to 0.0 and ensure 'total' equals 'subtotal'. ONLY calculate and add GST if the user explicitly asks for it (e.g., 'with GST' or 'add 18% tax').]"
+    enriched_prompt = (
+        prompt + client_directory_text + email_enforcement + financial_enforcement
+    )
     print("🧠 Sending prompt + client directory to Pass 1...")
 
     try:
@@ -195,7 +231,6 @@ async def prompt_to_invoice_generator(firm_id: str, response: PromptRequestModel
                 conn = psycopg2.connect(DB_URL)
                 cursor = conn.cursor()
 
-                # 👈 Fixed query: Inserts into CLIENTS table instead of financials!
                 cursor.execute(
                     """
                     INSERT INTO clients 
@@ -230,8 +265,35 @@ async def prompt_to_invoice_generator(firm_id: str, response: PromptRequestModel
             raise HTTPException(status_code=500, detail="Invalid format generated.")
 
         invoice_dict = validating_payload.model_dump()
+        # 👇 1. Intercept PENDING-ID or dots
+        invoice_id = invoice_dict.get("invoice_number", "")
+        if (
+            not invoice_id
+            or invoice_id == "."
+            or len(invoice_id) <= 2
+            or invoice_id == "PENDING-ID"
+        ):
+            print("⚠️ AI sent PENDING-ID! Fetching official ID from database...")
+
+            safe_id_data = get_next_invoice_id(firm_id)
+
+            # If the database errored out, we catch it gracefully
+            if "error" in safe_id_data:
+                print(f"🚨 DB Error caught in interceptor: {safe_id_data['error']}")
+                invoice_id = f"SYS-INV-{str(uuid.uuid4())[:3]}"
+            else:
+                # Successfully grabs PL-INV-002
+                invoice_id = safe_id_data["invoice_id"]
+
+            invoice_dict["invoice_number"] = invoice_id
+
         inv_name = invoice_dict["client"]["name"]
-        output_filename = f"{inv_name}_Invoice.pdf"
+
+        safe_inv_name = re.sub(r"[^a-zA-Z0-9_\-]", "_", inv_name.strip())
+
+        # Now it will be Autobahn_Trucking_PL-INV-001.pdf
+        output_filename = f"{safe_inv_name}_{invoice_id}.pdf"
+
         address_data = invoice_dict["client"]["address"]
         for key in ["line1", "line2", "line3"]:
             if address_data.get(key) is None:
@@ -240,8 +302,23 @@ async def prompt_to_invoice_generator(firm_id: str, response: PromptRequestModel
         print("🖨️  Sending AI data to Playwright engine...")
 
         try:
+            print("🖨️  Fetching Firm Settings and sending data to Playwright engine...")
+
+            conn = psycopg2.connect(DB_URL)
+            cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+            cursor.execute(
+                "SELECT * FROM firm_settings WHERE id = %s::uuid", (firm_id,)
+            )
+            firm_data = cursor.fetchone()
+
+            if not firm_data:
+                firm_data = {"firm_name": "Unknown Firm"}
+
+            cursor.close()
+            conn.close()
             await anyio.to_thread.run_sync(
-                generate_invoice_pdf, invoice_dict, output_filename
+                generate_invoice_pdf, invoice_dict, dict(firm_data), output_filename
             )
         except Exception as e:
             print(f"PDF Generation error {e}")
@@ -299,7 +376,6 @@ async def prompt_to_invoice_generator(firm_id: str, response: PromptRequestModel
 
             invoice_id = invoice_dict.get("invoice_number", "INV-UNKNOWN")
 
-            # 👈 Injected firm_id and created_by into the financial record
             cursor.execute(
                 """
                 INSERT INTO firm_financials 
@@ -324,11 +400,30 @@ async def prompt_to_invoice_generator(firm_id: str, response: PromptRequestModel
                 ),
             )
             conn.commit()
-            cursor.close()
-            conn.close()
             print(f"✅ PostgreSQL record {invoice_id} upserted successfully!")
+
         except Exception as e:
             print(f"⚠️ Database Error: {e}")
+
+        try:
+            match = re.search(r"\d+", invoice_id)
+            if match:
+                used_num = int(match.group())
+                # Only bumps the DB counter if we actually successfully finalized this number!
+                cursor.execute(
+                    """
+                    UPDATE firm_settings 
+                    SET next_invoice_number = GREATEST(next_invoice_number, %s + 1)
+                    WHERE id = %s::uuid
+                    """,
+                    (used_num, firm_id),
+                )
+                conn.commit()
+        except Exception as e:
+            print(f"⚠️ Auto-bump Error: {e}")
+
+        cursor.close()
+        conn.close()
 
         client_email = invoice_dict["client"].get("email")
         if client_email:
@@ -345,9 +440,35 @@ async def prompt_to_invoice_generator(firm_id: str, response: PromptRequestModel
         conn = psycopg2.connect(DB_URL)
         cursor = conn.cursor()
 
-        cursor.execute("SELECT nextval('expense_number_seq');")
-        next_val = cursor.fetchone()[0]
-        expense_id = f"EXP-{next_val}"
+        # 👇 Fetch and increment the firm-specific expense ID
+        cursor.execute(
+            """
+            UPDATE firm_settings 
+            SET next_expense_number = next_expense_number + 1 
+            WHERE id = %s::uuid 
+            RETURNING next_expense_number - 1, firm_name;
+            """,
+            (firm_id,),
+        )
+
+        result = cursor.fetchone()
+        if result:
+            next_val = result[0]
+            firm_name = result[1] or "EXP"
+
+            # Generate the prefix
+            words = firm_name.strip().split()
+            if len(words) >= 2:
+                prefix = (words[0][0] + words[1][0]).upper()
+            elif len(words) == 1:
+                prefix = words[0][:3].upper()
+            else:
+                prefix = "EXP"
+
+            expense_id = f"{prefix}-EXP-{str(next_val).zfill(3)}"
+        else:
+            # Fallback just in case something goes wildly wrong
+            expense_id = f"EXP-UNKNOWN-{str(uuid.uuid4())[:4]}"
 
         print("💾 Logging EXPENSE to PostgreSQL...")
 
