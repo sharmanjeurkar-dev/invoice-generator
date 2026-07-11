@@ -6,7 +6,8 @@ import { Scale, Mail, Lock, Loader2, Eye, EyeOff, User } from "lucide-react";
 
 export default function LoginPage() {
   const [isLogin, setIsLogin] = useState(true);
-  const [name, setName] = useState(""); // 👈 Added state for Name
+  const [firmName, setFirmName] = useState("")
+  const [name, setName] = useState(""); 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -27,12 +28,13 @@ export default function LoginPage() {
         window.location.href = "/agent";
       } else {
         // 👈 Passed the name securely into Supabase's user_metadata
-        const { error } = await supabase.auth.signUp({ 
+       const { error } = await supabase.auth.signUp({ 
           email, 
           password,
           options: {
             data: {
-              full_name: name 
+              full_name: name,
+              firm_name: firmName // 👈 Send the firm name to the SQL trigger!
             }
           }
         });
@@ -110,6 +112,29 @@ export default function LoginPage() {
         <form onSubmit={handleAuth} className="space-y-4">
           
           {/* 👈 Conditionally render the Name field ONLY during registration */}
+          
+          {!isLogin && (
+            <div>
+              <label className="block text-[13px] font-medium mb-1.5" style={{ color: "#374151" }}>
+                Firm Name
+              </label>
+              <div className="relative">
+                <Scale
+                  className="absolute left-3.5 top-1/2 -translate-y-1/2 h-[16px] w-[16px]"
+                  style={{ color: "#9CA3AF" }}
+                />
+                <input
+                  type="text"
+                  required
+                  value={firmName}
+                  onChange={(e) => setFirmName(e.target.value)}
+                  className="field-input w-full rounded-lg pl-10 pr-3.5 py-2.5 text-[14px]"
+                  style={{ color: "#1A1A1A" }}
+                  placeholder="Pentacles Legal"
+                />
+              </div>
+            </div>
+          )}
           {!isLogin && (
             <div>
               <label className="block text-[13px] font-medium mb-1.5" style={{ color: "#374151" }}>
