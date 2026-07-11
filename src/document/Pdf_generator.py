@@ -8,7 +8,10 @@ from playwright.sync_api import sync_playwright
 
 
 def generate_invoice_pdf(
-    invoice_dict: dict, firm_dict: dict, output_filename="invoice_output.pdf"
+    invoice_dict: dict,
+    firm_dict: dict,
+    user_name: str,
+    output_filename="invoice_output.pdf",
 ):
 
     due_duration = 22
@@ -33,7 +36,9 @@ def generate_invoice_pdf(
     # Load your dynamic HTML file (ensure the filename matches what is in your templates folder)
     template = env.get_template("invoice.html")
 
-    rendered_html = template.render(invoice=invoice_dict, firm=firm_dict)
+    rendered_html = template.render(
+        invoice=invoice_dict, firm=firm_dict, user_name=user_name
+    )
 
     output_path = os.path.join(project_root, output_filename)
 

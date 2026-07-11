@@ -51,7 +51,8 @@ class InvoicePayloadModel(BaseModel):
 
 class PromptRequestModel(BaseModel):
     prompt: str
-    user_id: str  # 👈 Added user_id to accept it from the frontend
+    user_id: str
+    user_name: Optional[str] = "User"
 
 
 # Firm settings
@@ -265,7 +266,7 @@ async def prompt_to_invoice_generator(firm_id: str, response: PromptRequestModel
             raise HTTPException(status_code=500, detail="Invalid format generated.")
 
         invoice_dict = validating_payload.model_dump()
-        # 👇 1. Intercept PENDING-ID or dots
+
         invoice_id = invoice_dict.get("invoice_number", "")
         if (
             not invoice_id
@@ -318,7 +319,11 @@ async def prompt_to_invoice_generator(firm_id: str, response: PromptRequestModel
             cursor.close()
             conn.close()
             await anyio.to_thread.run_sync(
-                generate_invoice_pdf, invoice_dict, dict(firm_data), output_filename
+                generate_invoice_pdf,
+                invoice_dict,
+                dict(firm_data),
+                response.user_name,
+                output_filename,
             )
         except Exception as e:
             print(f"PDF Generation error {e}")

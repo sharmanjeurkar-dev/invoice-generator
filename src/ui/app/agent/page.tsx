@@ -114,7 +114,7 @@ function DashboardHeader() {
 // 2. This remains the single default export for the page
 export default function InvoiceGeneratorPage() {
   const { firmId, userId, isLoading: isFirmLoading } = useFirmStore();
-
+const [user_name, setUserName] = useState("User");
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [status, setStatus] = useState<Status>("idle");
@@ -162,6 +162,24 @@ export default function InvoiceGeneratorPage() {
   }, [firmId]);
 
   useEffect(() => {
+    if (!userId) return;
+    
+    const fetchName = async () => {
+      const { data } = await supabase
+        .from("profiles")
+        .select("full_name")
+        .eq("id", userId)
+        .single();
+        
+      if (data?.full_name) {
+        setUserName(data.full_name);
+      }
+    };
+    
+    fetchName();
+  }, [userId]);
+
+  useEffect(() => {
     chatBottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, status]);
 
@@ -196,7 +214,8 @@ export default function InvoiceGeneratorPage() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ 
             prompt: promptPayload,
-            user_id: userId  
+            user_id: userId ,
+            user_name:user_name
           }),
         }
       );
