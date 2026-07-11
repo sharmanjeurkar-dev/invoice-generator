@@ -35,7 +35,9 @@ interface Message {
 type Status = "idle" | "thinking" | "rendering" | "success" | "error";
 
 function buildPromptPayload(messages: Message[], latestUserText: string, sessionId: string): string {
-  const systemNote = `\n\n[SYSTEM NOTE: IF you are drafting an invoice, the invoice_number for this session is ${sessionId}. Ignore this ID if the user is logging an expense or asking for a report.]`;
+  
+  const safeId = sessionId || "PENDING-ID"; 
+  const systemNote = `\n\n[SYSTEM NOTE: IF you are drafting an invoice, the invoice_number for this session is ${safeId}. Ignore this ID if the user is logging an expense or asking for a report.]`;
   
   if (messages.length === 0) return latestUserText + systemNote;
 
@@ -92,13 +94,14 @@ export default function InvoiceGeneratorPage() {
     }
   };
 
-  const fetchNewInvoiceId = useCallback(async () => {
+   const fetchNewInvoiceId = useCallback(async () => {
     if (!firmId) return; 
     try {
       const res = await fetch(`http://127.0.0.1:8000/api/firms/${firmId}/get-next-invoice-id`);
       const data = await res.json();
       if (data.invoice_id) {
         invoiceIdRef.current = data.invoice_id;
+        console.log(invoiceIdRef.current)
       }
     } catch (err) {
       console.error("Failed to fetch ID", err); 
@@ -184,9 +187,11 @@ export default function InvoiceGeneratorPage() {
         const contentDisposition = response.headers.get("Content-Disposition");
         
         if (contentDisposition) {
-          const match = contentDisposition.match(/filename="?([^"]+)"?/);
+          // This bulletproof regex grabs the filename whether it has quotes around it or not
+          const match = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
           if (match && match[1]) {
-            filename = match[1];
+            // Strip any remaining quotes from the extracted string
+            filename = match[1].replace(/['"]/g, ''); 
           }
         }
         

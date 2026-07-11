@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Invoice #AUT11526</title>
+<title>Invoice #{{ invoice.invoice_number }}</title>
 <style>
   body {
     font-family: Calibri, Arial, sans-serif;
@@ -16,7 +16,7 @@
   }
   .blue { color: #1f3864; }
   .red { color: #c0392b; }
-  .companyname { font-size: 19px; font-weight: bold; }
+  .companyname { font-size: 19px; font-weight: bold; text-transform: uppercase; }
   .formerly { font-size: 11px; font-weight: bold; }
   .addr { font-size: 12px; font-style: italic; line-height: 1.35; }
   .reg { font-size: 12px; line-height: 1.4; }
@@ -78,38 +78,36 @@
 <table class="pagewrap" cellpadding="0" cellspacing="0" border="0">
   <tr>
     <td colspan="3" align="center" style="padding:15px 0;">
-      {% if logo_data %}<img src="{{ logo_data }}" alt="Logo" style="max-height:60px;">{% endif %}
+      {% if firm.logo_url %}
+        <img src="{{ firm.logo_url }}" alt="Logo" style="max-height:60px;">
+      {% endif %}
     </td>
   </tr>
   <tr>
-    <!-- Left vertical INVOICE / number column -->
     <td width="13" valign="middle" align="center" class="invoice-col" style="border-right:1px solid #000000;" rowspan="6">
       <span class="invoiceword">INVOICE</span>
-      <span class="invoicenum">#{{ invoice_number }}</span>
+      <span class="invoicenum">#{{ invoice.invoice_number }}</span>
     </td>
 
-    <!-- Top right area: company box + date box -->
     <td colspan="2" style="padding:15px 20px 10px 14px;">
       <table cellpadding="0" cellspacing="0" border="0" width="100%">
         <tr>
           <td width="430" valign="top" style="border:1px solid #000000; padding:6px 10px;">
-            <div class="companyname blue">Pentacles Legal Partenrs LLP</div>
-            <div class="formerly blue">(Formerly known as AKPD Legal Partners LLP)</div>
+            <div class="companyname blue">{{ firm.firm_name }}</div>
             <div class="addr blue">
-              #806, BramhaCorp Vantage Tower, Block C,<br>
-              Bavdhan, Pune 411021<br>
-              91 9130024827 | legal@pentacleslegal.com
+              {{ firm.address_line1 }}<br>
+              {% if firm.address_line2 %}{{ firm.address_line2 }}<br>{% endif %}
+              {{ firm.contact_number }} | {{ firm.contact_email }}
             </div>
             <div class="reg blue">
-              LLPIN: ACA-2411<br>
-              PAN: ACBFA3255C
+              PAN: {{ firm.pan_number }}
             </div>
           </td>
           <td width="20"></td>
           <td width="180" valign="top" style="border:1px solid #000000;">
             <table cellpadding="0" cellspacing="0" border="0" width="100%">
-              <tr><td style="padding:8px 0 8px 10px; font-size:13px; font-weight:bold; text-align:left;" class="blue">Invoice Date: {{ invoice_date }}</td></tr>
-              <tr><td style="padding:0 0 8px 10px; font-size:13px; font-weight:bold; text-align:left;" class="blue">Due Date: {{ due_date }}</td></tr>
+              <tr><td style="padding:8px 0 8px 10px; font-size:13px; font-weight:bold; text-align:left;" class="blue">Invoice Date:<br>{{ invoice.invoice_date }}</td></tr>
+              <tr><td style="padding:0 0 8px 10px; font-size:13px; font-weight:bold; text-align:left;" class="blue">Due Date:<br>{{ invoice.due_date }}</td></tr>
             </table>
           </td>
         </tr>
@@ -118,17 +116,19 @@
   </tr>
 
   <tr>
-    <!-- BILL TO box -->
     <td colspan="2" style="padding:0 20px 0 14px;">
       <table cellpadding="0" cellspacing="0" border="0" width="100%">
         <tr>
           <td width="430" height="120" valign="top" style="border:1px solid #000000; padding:6px 10px;">
             <span class="billto-label red">BILL TO</span><br><br>
             <span class="blue" style="font-size:12px;">
-              {{ client.name }}<br>
-              {% if client.address %}{{ client.address.line1 }}<br>{{ client.address.line2 }}, {{ client.address.line3 }}<br>{% endif %}
-              {% if client.email %}{{ client.email }}<br>{% endif %}
-              {% if client.phone %}{{ client.phone }}{% endif %}
+              <strong>{{ invoice.client.name }}</strong><br>
+              {% if invoice.client.address %}
+                {{ invoice.client.address.line1 }}<br>
+                {% if invoice.client.address.line2 %}{{ invoice.client.address.line2 }}<br>{% endif %}
+                {% if invoice.client.address.line3 %}{{ invoice.client.address.line3 }}<br>{% endif %}
+              {% endif %}
+              {% if invoice.client.email %}{{ invoice.client.email }}<br>{% endif %}
             </span>
           </td>
           <td></td>
@@ -138,12 +138,10 @@
   </tr>
 
   <tr>
-    <!-- spacer to shift table down -->
     <td colspan="2" height="20"></td>
   </tr>
 
   <tr>
-    <!-- Items table -->
     <td colspan="2" style="padding:0 24px 0 14px;">
       <table class="items" cellpadding="0" cellspacing="0" border="0" width="100%">
         <tr>
@@ -152,42 +150,41 @@
           <th width="30%">Details</th>
           <th width="11%">TOTAL</th>
         </tr>
-        {% for service in services %}
+        {% for service in invoice.services %}
         <tr>
           {% if loop.first %}
-          <td align="center" valign="middle" rowspan="{{ services|length }}">{{ description | default('Legal Professional Fees') }}</td>
+          <td align="center" valign="middle" rowspan="{{ invoice.services|length }}"><strong>{{ service.category | default('Legal Professional Fees') }}</strong></td>
           {% endif %}
           <td align="center" valign="middle">{{ service.qty | default(1) }}</td>
           <td>{{ service.details }}</td>
-          <td align="right">{{ "%.2f"|format(service.amount) }}</td>
+          <td align="right">₹{{ "%.2f"|format(service.amount) }}</td>
         </tr>
         {% endfor %}
         <tr>
           <td style="border:none;"></td>
           <td style="border:none;"></td>
           <td class="subtotal-label">SUBTOTAL</td>
-          <td align="right">{{ "%.2f"|format(subtotal) }}</td>
+          <td align="right">₹{{ "%.2f"|format(invoice.subtotal) }}</td>
         </tr>
-        {% if gst %}
+        {% if invoice.gst %}
         <tr>
           <td style="border:none;"></td>
           <td style="border:none;"></td>
-          <td class="subtotal-label">GST ({{ (gst * 100) | round(0) | int }}%)</td>
-          <td align="right">{{ "%.2f"|format(subtotal * gst) }}</td>
+          <td class="subtotal-label">GST (18%)</td>
+          <td align="right">{{ "%.2f"|format(invoice.total - invoice.subtotal) }}</td>
         </tr>
         {% endif %}
         <tr>
           <td style="border:none;"></td>
           <td style="border:none;"></td>
           <td class="subtotal-label">TOTAL</td>
-          <td align="right">{{ "%.2f"|format(total) }}</td>
+          <td align="right"><strong>₹{{ "%.2f"|format(invoice.total) }}</strong></td>
         </tr>
       </table>
     </td>
   </tr>
 
   <tr>
-    <!-- Thank you line -->
     <td colspan="2" style="padding:0 24px 0 14px;">
       <table cellpadding="0" cellspacing="0" border="0" width="100%">
         <tr><td style="border-bottom:1px solid #000000; padding:8px 10px; font-size:12px;">Thank you for your business!</td></tr>
@@ -196,22 +193,21 @@
   </tr>
 
   <tr>
-    <!-- Bank details + signature -->
     <td colspan="2" style="padding:15px 20px 25px 6px;">
       <table cellpadding="0" cellspacing="0" border="0" width="100%">
         <tr>
           <td width="430" valign="top" style="border:1px solid #000000;">
             <div class="paymentmode">Mode of Payment : Bank Transfer/ UPI/ GPAY</div>
             <div class="bankdetails blue">
-              AKPD LEGAL PARTNERS LLP<br>
-              Current a/c no: 10132560832<br>
-              IFSC Code: IDFB0041355<br>
-              Bank: IDFC First Bank<br>
-              Branch: Aundh, Pune, Maharashtra
+              <strong>{{ firm.firm_name }}</strong><br>
+              Current a/c no: {{ firm.account_number }}<br>
+              IFSC Code: {{ firm.ifsc_code }}<br>
+              Bank: {{ firm.bank_name }}<br>
+              Branch: {{ firm.bank_branch }}
             </div>
           </td>
           <td valign="bottom" align="right" style="font-size:13px; font-weight:bold; padding-right:40px;" class="blue">
-            For Pentacles Legal Partners LLP
+            For {{ firm.firm_name }}
           </td>
         </tr>
       </table>
@@ -219,7 +215,6 @@
   </tr>
 
   <tr>
-    <!-- Footer -->
     <td colspan="3" align="center" style="padding:15px 0; font-size:12px; border-top:1px solid #000000;">
       This is a Computer Generated Invoice
     </td>

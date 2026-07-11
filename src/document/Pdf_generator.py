@@ -1,4 +1,3 @@
-import base64
 import os
 from datetime import datetime, timedelta
 
@@ -8,32 +7,34 @@ from jinja2 import Environment, FileSystemLoader
 from playwright.sync_api import sync_playwright
 
 
-def generate_invoice_pdf(invoice_data, output_filename="invoice_output.pdf"):
+def generate_invoice_pdf(
+    invoice_dict: dict, firm_dict: dict, output_filename="invoice_output.pdf"
+):
+
     due_duration = 22
     today = datetime.now()
     due_date = today + timedelta(due_duration)
-    today = today.strftime("%d/%m/%Y")
-    due_date = due_date.strftime("%d/%m/%Y")
-    invoice_data["invoice_number"] = invoice_data.get("invoice_number") or "AUT-001"
-    invoice_data["invoice_date"] = invoice_data.get("invoice_date") or today
-    invoice_data["due_date"] = invoice_data.get("due_date") or due_date
+
+    invoice_dict["invoice_number"] = invoice_dict.get("invoice_number") or "INV-UNKNOWN"
+    invoice_dict["invoice_date"] = invoice_dict.get("invoice_date") or today.strftime(
+        "%d/%m/%Y"
+    )
+    invoice_dict["due_date"] = invoice_dict.get("due_date") or due_date.strftime(
+        "%d/%m/%Y"
+    )
 
     current_dir = os.path.dirname(os.path.abspath(__file__))
     project_root = os.path.abspath(os.path.join(current_dir, "..", ".."))
+
+    # Keeping your existing template directory structure
     template_dir = os.path.join(project_root, "templates")
-
-    logo_path = os.path.join(template_dir, "logo.png")
-    if os.path.exists(logo_path):
-        with open(logo_path, "rb") as f:
-            logo_b64 = base64.b64encode(f.read()).decode("utf-8")
-        invoice_data["logo_data"] = f"data:image/png;base64,{logo_b64}"
-    else:
-        invoice_data["logo_data"] = ""
-
     env = Environment(loader=FileSystemLoader(template_dir))
+
+    # Load your dynamic HTML file (ensure the filename matches what is in your templates folder)
     template = env.get_template("invoice.html")
 
-    rendered_html = template.render(**invoice_data)
+    rendered_html = template.render(invoice=invoice_dict, firm=firm_dict)
+
     output_path = os.path.join(project_root, output_filename)
 
     print("🌐 Spinning up headless browser...")
@@ -41,7 +42,8 @@ def generate_invoice_pdf(invoice_data, output_filename="invoice_output.pdf"):
         browser = p.chromium.launch()
         page = browser.new_page()
 
-        page.set_content(rendered_html)
+        # Playwright renders the injected HTML string
+        page.set_content(rendered_html, wait_until="networkidle")
 
         page.pdf(
             path=output_path,
@@ -56,11 +58,18 @@ def generate_invoice_pdf(invoice_data, output_filename="invoice_output.pdf"):
 
 
 if __name__ == "__main__":
-    test_data = {
+    # A quick mock test to ensure it runs locally if executed directly
+    test_invoice = {
         "client": {"name": "Test Client"},
-        "services": [{"details": "Test Service", "amount": 1000}],
+        "services": [{"details": "Test Service", "amount": 1000, "qty": 1}],
         "subtotal": 1000,
-        "gst": 0.18,
+        "gst": 180,
         "total": 1180,
     }
-    generate_invoice_pdf(test_data, "playwright_test.pdf")
+    test_firm = {
+        "firm_name": "Test Firm LLC",
+        "logo_url": "https://via.placeholder.com/150",
+        "bank_name": "Test Bank",
+        "account_number": "123456789",
+    }
+    generate_invoice_pdf(test_invoice, test_firm, "playwright_test.pdf")
