@@ -1,6 +1,7 @@
 import asyncio
 import os
 import re
+import sys
 import uuid
 from typing import List, Optional
 
@@ -14,8 +15,13 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from pydantic import BaseModel
 
+script_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.abspath(os.path.join(script_dir, ".."))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
+from intelligence.llm.gemma_service import generate_json_for_invoice_from_prompt
 from src.document.Pdf_generator import generate_invoice_pdf
-from tests.test_baseline_inference import generate_json_for_inbvoice_from_prompt
 
 
 # invoice
@@ -190,7 +196,9 @@ async def prompt_to_invoice_generator(firm_id: str, response: PromptRequestModel
     print("🧠 Sending prompt + client directory to Pass 1...")
 
     try:
-        llm_response = generate_json_for_inbvoice_from_prompt(enriched_prompt)
+        llm_response = await anyio.to_thread.run_sync(
+            generate_json_for_invoice_from_prompt, enriched_prompt
+        )
     except Exception as e:
         print(f"LLM Error: {e}")
         raise HTTPException(status_code=500, detail="failed to generate Ai response")
@@ -555,7 +563,9 @@ async def prompt_to_invoice_generator(firm_id: str, response: PromptRequestModel
             )
 
             print("🧠 Sending raw data back to AI for analysis...")
-            second_llm_response = generate_json_for_inbvoice_from_prompt(analyst_prompt)
+            second_llm_response = await anyio.to_thread.run_sync(
+                generate_json_for_invoice_from_prompt, analyst_prompt
+            )
 
             if second_llm_response.get("status") == "clarification":
                 return JSONResponse(

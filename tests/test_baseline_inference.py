@@ -2,12 +2,16 @@ import json
 import os
 
 from dotenv import load_dotenv
-from google import genai
-from google.genai import types
+from openai import OpenAI
 
 load_dotenv()
 
-client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
+client = OpenAI(
+    base_url="https://integrate.api.nvidia.com/v1",
+    api_key=os.getenv("NVIDIA_API_KEY"),
+    timeout=30.0,
+    max_retries=1,
+)
 
 
 def generate_json_from_prompt() -> dict:
@@ -22,19 +26,25 @@ def generate_json_from_prompt() -> dict:
 
     prompt = input("Enter prompt: ")
     full_prompt = f"{system_instruction}\n\nUSER PROMPT:\n{prompt}"
-
+    key = os.getenv("NVIDIA_API_KEY")
+    print("Key loaded:", bool(key), key[:8] if key else None)
     try:
-        response = client.models.generate_content(
-            model="gemma-4-31b-it",  # Your specific model string
-            contents=full_prompt,
-            config=types.GenerateContentConfig(
-                temperature=0.1,
-                # 🚨 REMOVED response_mime_type so the Gemma server doesn't crash!
-            ),
+        print("Sending request to NVIDIA...")
+        response = client.chat.completions.create(
+            model="meta/llama-3.1-8b-instruct",  # The correct NVIDIA path
+            messages=[
+                {
+                    "role": "system",
+                    "content": f"{system_instruction}\n\nIMPORTANT: Return ONLY valid JSON. No markdown blocks.",
+                },
+                {"role": "user", "content": full_prompt},
+            ],
+            temperature=0.1,
+            max_tokens=2048,
         )
 
-        raw_content = response.text.strip()
-
+        raw_content = response.choices[0].message.content.strip()
+        print("Got response.")
         # 🚨 BROUGHT BACK the markdown stripping since Gemma will likely add it
         if raw_content.startswith("```json"):
             raw_content = raw_content[7:]
@@ -49,29 +59,11 @@ def generate_json_from_prompt() -> dict:
         return {"status": "success", "data": parsed_json}
 
     except json.JSONDecodeError:
-        print(f"⚠️ Failed to parse JSON from AI: {response.text}")
+        print(f"⚠️ Failed to parse JSON from AI: {raw_content}")
         return {"status": "error", "message": "AI returned malformed data."}
     except Exception as e:
-        print(f"⚠️ Google AI Studio Error: {e}")
+        print(f"⚠️ NVIDIA API ERROR: {e}")
         return {"status": "error", "message": "Failed to connect to the AI model."}
 
 
 print(generate_json_from_prompt())
-# import os
-
-# from dotenv import load_dotenv
-# from google import genai
-
-# load_dotenv()
-
-# # Connect to Google
-# client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
-
-# print("🔍 Fetching models available to your API key...\n")
-
-# # List every single model you are allowed to access
-# try:
-#     for model in client.models.list():
-#         print(model.name)
-# except Exception as e:
-#     print(f"Error fetching models: {e}")
