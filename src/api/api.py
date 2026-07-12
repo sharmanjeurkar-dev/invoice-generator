@@ -98,9 +98,8 @@ PDF_SEMAPHORE = asyncio.Semaphore(3)
 @app.get("/api/firms/{firm_id}/get-next-invoice-id")
 async def get_next_invoice_id(firm_id: str):
     try:
-        db_url = os.getenv("DATABASE_URL")
         # asyncpg used
-        conn = await asyncpg.connect(db_url)
+        conn = await asyncpg.connect(DB_URL)
         # asyncpg used
         result = await conn.fetchrow(
             """
@@ -149,7 +148,7 @@ async def prompt_to_invoice_generator(firm_id: str, response: PromptRequestModel
     client_directory_text = ""
     try:
         # asyncpg used
-        conn = await asyncpg.connect(DB_URL)
+        conn = await asyncpg.connect(DB_URL, statement_cache_size=0)
 
         # asyncpg used
         clients = await conn.fetch(
@@ -235,7 +234,7 @@ async def prompt_to_invoice_generator(firm_id: str, response: PromptRequestModel
             print(f"🔍 Auto-saving client '{client_name}' to directory...")
             try:
                 # asyncpg used
-                conn = await asyncpg.connect(DB_URL)
+                conn = await asyncpg.connect(DB_URL, statement_cache_size=0)
 
                 # asyncpg used
                 await conn.execute(
@@ -309,7 +308,7 @@ async def prompt_to_invoice_generator(firm_id: str, response: PromptRequestModel
             print("🖨️  Fetching Firm Settings and sending data to Playwright engine...")
 
             # asyncpg used
-            conn = await asyncpg.connect(DB_URL)
+            conn = await asyncpg.connect(DB_URL, statement_cache_size=0)
 
             # asyncpg used
             firm_data_record = await conn.fetchrow(
@@ -383,7 +382,7 @@ async def prompt_to_invoice_generator(firm_id: str, response: PromptRequestModel
         print("💾 Upserting EARNING to PostgreSQL ledger...")
         try:
             # asyncpg used
-            conn = await asyncpg.connect(DB_URL)
+            conn = await asyncpg.connect(DB_URL, statement_cache_size=0)
 
             services_list = invoice_dict.get("services", [])
             service_strings = [
@@ -438,7 +437,7 @@ async def prompt_to_invoice_generator(firm_id: str, response: PromptRequestModel
     # --- LOG_EXPENSE MODE ---
     elif action == "log_expense":
         # asyncpg used
-        conn = await asyncpg.connect(DB_URL)
+        conn = await asyncpg.connect(DB_URL, statement_cache_size=0)
 
         # asyncpg used
         result = await conn.fetchrow(
@@ -499,7 +498,7 @@ async def prompt_to_invoice_generator(firm_id: str, response: PromptRequestModel
         print("📊 Generating Financial Report...")
         try:
             # asyncpg used
-            conn = await asyncpg.connect(DB_URL)
+            conn = await asyncpg.connect(DB_URL, statement_cache_size=0)
 
             # asyncpg used
             time_rows = await conn.fetch(
@@ -585,7 +584,7 @@ async def prompt_to_invoice_generator(firm_id: str, response: PromptRequestModel
 async def get_settings(firm_id: str):
     try:
         # asyncpg used
-        conn = await asyncpg.connect(DB_URL)
+        conn = await asyncpg.connect(DB_URL, statement_cache_size=0)
 
         # asyncpg used
         settings = await conn.fetchrow(
@@ -608,7 +607,7 @@ async def get_settings(firm_id: str):
 async def update_settings(firm_id: str, settings: FirmSettings):
     try:
         # asyncpg used
-        conn = await asyncpg.connect(DB_URL)
+        conn = await asyncpg.connect(DB_URL, statement_cache_size=0)
 
         # asyncpg used
         await conn.execute(
