@@ -1,74 +1,77 @@
 import json
 import os
-import sys
 
-from llama_cpp import Llama
+from dotenv import load_dotenv
+from google import genai
+from google.genai import types
 
-current_dir = os.path.dirname(os.path.abspath(__file__))
-project_root = os.path.abspath(os.path.join(current_dir, ".."))
-sys.path.insert(0, project_root)
-from src.document.Pdf_generator import generate_invoice_pdf
+load_dotenv()
 
-llma = Llama(
-    model_path="./models/gemma-2-9b-it-Q5_K_M.gguf",
-    n_ctx=8192,
-    n_batch=2048,
-    flash_attn=True,  # efficient memory and attention management
-    n_gpu_layers=-1,
-    verbose=False,
-)
-conversation_history = ""
-
-system_promt_file_path = (
-    f"/Users/sharmanjeurkar/Projects/invoice-agent/config/system_prompt.txt"
-)
-with open(system_promt_file_path, "r", encoding="utf-8") as f:
-    system_instruction = f.read().strip()
+client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
 
 
-def generate_json_for_inbvoice_from_prompt(query: str) -> dict:
-    formatted_prompt = (
-        f"<start_of_turn>user\n{system_instruction}\n\n{query}<end_of_turn>\n"
-        f"<start_of_turn>model\n"
-    )
-    conversation_history = f"{formatted_prompt}"
+def generate_json_from_prompt() -> dict:
+    system_instruction = """
+    You are an expert legal financial AI. Extract the details from the user's prompt
+    and format them strictly as a JSON object matching the InvoicePayloadModel schema.
+    If you are missing critical information (like a client address and it is not in the directory),
+    return a JSON object with {"status": "clarification", "message": "Your question to the user"}.
 
-    output = llma(
-        prompt=conversation_history,
-        max_tokens=5000,
-        stop=["<end_of_turn>"],
-        echo=False,
-    )
-    raw_response = output["choices"][0]["text"].strip()
-    print(f"\n--- RAW AI RESPONSE ---\n{raw_response}\n-----------------------\n")
-    if "```json" in raw_response:
-        raw_response = raw_response.split("```json")[1]
-    if "```" in raw_response:
-        raw_response = raw_response.split("```")[0]
-    conversation_history += f"{raw_response} <end_of_turn>\n"
-    print("\n" + "=" * 50)
-    print("               AGENT OUTPUT")
-    print("=" * 50 + "\n")
+    IMPORTANT: You must return ONLY valid JSON. Do not include markdown formatting like ```json.
+    """
 
-    # Find the first '{' and the last '}' in the text
-    start_idx = raw_response.find("{")
-    end_idx = raw_response.rfind("}")
+    prompt = input("Enter prompt: ")
+    full_prompt = f"{system_instruction}\n\nUSER PROMPT:\n{prompt}"
 
-    if start_idx != -1 and end_idx != -1:
-        # Extract ONLY the JSON part
-        cleaned_response = raw_response[start_idx : end_idx + 1]
-        parsed_json = json.loads(cleaned_response, strict=False)
-        print("🟢 STATUS: [GENERATION MODE] - Final  JSON Generated Successfully:\n")
+    try:
+        response = client.models.generate_content(
+            model="gemma-4-31b-it",  # Your specific model string
+            contents=full_prompt,
+            config=types.GenerateContentConfig(
+                temperature=0.1,
+                # 🚨 REMOVED response_mime_type so the Gemma server doesn't crash!
+            ),
+        )
+
+        raw_content = response.text.strip()
+
+        # 🚨 BROUGHT BACK the markdown stripping since Gemma will likely add it
+        if raw_content.startswith("```json"):
+            raw_content = raw_content[7:]
+        if raw_content.endswith("```"):
+            raw_content = raw_content[:-3]
+
+        parsed_json = json.loads(raw_content.strip())
+
+        if parsed_json.get("status") == "clarification":
+            return parsed_json
+
         return {"status": "success", "data": parsed_json}
-    else:
-        return {"status": "clarification", "message": raw_response}
+
+    except json.JSONDecodeError:
+        print(f"⚠️ Failed to parse JSON from AI: {response.text}")
+        return {"status": "error", "message": "AI returned malformed data."}
+    except Exception as e:
+        print(f"⚠️ Google AI Studio Error: {e}")
+        return {"status": "error", "message": "Failed to connect to the AI model."}
 
 
-print("\n" + "=" * 50)
+print(generate_json_from_prompt())
+# import os
 
+# from dotenv import load_dotenv
+# from google import genai
 
-def text_to_json(text: str, key: str = "Prompt"):
-    return json.dumps([key, text], separators=(",", ":"))
+# load_dotenv()
 
+# # Connect to Google
+# client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
 
-# prompt: Generate invoice for Ram of ₹30000 for Legal Opinion and for Document Verifaction ₹20000. Address:  23 and 24 Shree ambika heritage, Plot no 1, Sector 1, Khargar, Navi Mumbai, Mumbai 4102101
+# print("🔍 Fetching models available to your API key...\n")
+
+# # List every single model you are allowed to access
+# try:
+#     for model in client.models.list():
+#         print(model.name)
+# except Exception as e:
+#     print(f"Error fetching models: {e}")
