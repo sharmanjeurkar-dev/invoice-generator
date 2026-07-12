@@ -20,7 +20,7 @@ project_root = os.path.abspath(os.path.join(script_dir, ".."))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-from intelligence.llm.gemma_service import generate_json_for_invoice_from_prompt
+from intelligence.llm.llma_service import generate_json_for_invoice_from_prompt
 from src.document.Pdf_generator import generate_invoice_pdf
 
 
