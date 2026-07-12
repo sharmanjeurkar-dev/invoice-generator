@@ -96,7 +96,7 @@ function DashboardHeader() {
   return (
     <header className="flex justify-between items-center p-4 bg-white border-b border-[#e5e7eb] shadow-sm">
       <div className="font-semibold text-[#1f3864] tracking-wider uppercase text-sm">
-        Pentacles Legal Ledger
+        Ledger
       </div>
       
       <div className="flex items-center gap-2">
@@ -113,6 +113,7 @@ function DashboardHeader() {
 
 // 2. This remains the single default export for the page
 export default function InvoiceGeneratorPage() {
+  
   const { firmId, userId, isLoading: isFirmLoading } = useFirmStore();
 const [user_name, setUserName] = useState("User");
   const [messages, setMessages] = useState<Message[]>([]);
@@ -124,8 +125,37 @@ const [user_name, setUserName] = useState("User");
   const invoiceIdRef = useRef<string>("");
   const chatBottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const isLoading = status === "thinking" || status === "rendering";
+  const [isLoading, setIsLoading] = useState(false);
+  const [loadingText, setLoadingText] = useState("");
 
+  const loadingSteps = [
+    "Analyzing request...",
+    "Drafting invoice data...",
+    "Rendering PDF document...",
+    "Finalizing ledger entry...",
+    "Securing final files..."
+  ];
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    
+    if (isLoading) {
+      let stepIndex = 0;
+      setLoadingText(loadingSteps[0]); // Set the first message instantly
+      
+      interval = setInterval(() => {
+        stepIndex++;
+        if (stepIndex < loadingSteps.length) {
+          setLoadingText(loadingSteps[stepIndex]);
+        } else {
+          // If the backend takes longer than expected, stay on the last message
+          setLoadingText(loadingSteps[loadingSteps.length - 1]);
+          clearInterval(interval); 
+        }
+      }, 5000); // 5 seconds per step perfectly matches an 8-12 sec backend
+    }
+
+    return () => clearInterval(interval); // Cleanup to prevent memory leaks
+  }, [isLoading]);
   const handleDownloadDashboard = async (elementId: string) => {
     const element = document.getElementById(elementId);
     if (!element) return;
@@ -200,11 +230,13 @@ const [user_name, setUserName] = useState("User");
     setInput("");
     setErrorMessage("");
     setSuccessFile("");
-    setStatus("thinking");
 
     if (inputRef.current) inputRef.current.style.height = "44px";
 
     const promptPayload = buildPromptPayload(previousMessages, text, invoiceIdRef.current);
+
+    // 1. Trigger the staggered loading sequence
+    setIsLoading(true);
 
     try {
       const response = await fetch(
@@ -214,8 +246,8 @@ const [user_name, setUserName] = useState("User");
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ 
             prompt: promptPayload,
-            user_id: userId ,
-            user_name:user_name
+            user_id: userId,
+            user_name: user_name
           }),
         }
       );
@@ -294,6 +326,9 @@ const [user_name, setUserName] = useState("User");
         err instanceof Error ? err.message : "Something went wrong. Please try again."
       );
       setStatus("error");
+    } finally {
+      // 2. Shut off the loading sequence safely, regardless of success or failure
+      setIsLoading(false);
     }
   };
 
@@ -358,12 +393,6 @@ const [user_name, setUserName] = useState("User");
             </Link>
           </div>
 
-          <div className="inline-flex items-center gap-2 mb-2">
-            <Scale className="w-5 h-5 text-[#1f3864]" strokeWidth={1.5} />
-            <span className="text-xs font-semibold tracking-[0.2em] uppercase text-[#1f3864] opacity-70">
-              Pentacles Legal
-            </span>
-          </div>
           <h1 className="text-2xl font-bold tracking-tight text-[#1a1a1a]">
             LEDGER
           </h1>
@@ -503,19 +532,23 @@ const [user_name, setUserName] = useState("User");
               </div>
             ))}
 
-            {isLoading && (
-              <div className="flex justify-start">
-                <div className="w-6 h-6 rounded-full bg-[#1f3864]/10 flex items-center justify-center mr-3 mt-0.5 shrink-0">
-                  <Scale className="w-3 h-3 text-[#1f3864] opacity-70" />
-                </div>
-                <div className="bg-[#f9fafb] border border-[#e5e7eb] shadow-sm rounded-2xl rounded-tl-sm px-5 py-3.5 flex items-center gap-3">
-                  <Loader2 className="w-4 h-4 text-[#1f3864] animate-spin" />
-                  <span className="text-sm font-medium text-[#6b7280]">
-                    {status === "rendering" ? "Rendering PDF…" : "AI is processing…"}
-                  </span>
-                </div>
-              </div>
-            )}
+  
+            {/* Render the dynamic loading bubble */}
+        {isLoading && (
+          <div className="flex justify-start mb-4">
+            <div className="bg-gray-100 text-gray-600 rounded-2xl px-5 py-3 text-[14px] flex items-center gap-3 shadow-sm border border-gray-200">
+              {/* Spinning SVG Icon */}
+              <svg className="animate-spin h-4 w-4 text-gray-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+              {/* The dynamic text! */}
+              <span className="font-medium tracking-wide">
+                {loadingText}
+              </span>
+            </div>
+          </div>
+        )}
 
             {status === "success" && (
               <div className="flex justify-start">
