@@ -1,11 +1,11 @@
+import asyncio
 import os
 import re
 import uuid
 from typing import List, Optional
 
 import anyio
-import psycopg2
-import psycopg2.extras
+import asyncpg  # asyncpg used
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -92,21 +92,25 @@ app.add_middleware(
 
 load_dotenv()
 DB_URL = os.getenv("DATABASE_URL")
+PDF_SEMAPHORE = asyncio.Semaphore(3)
 
 
 @app.get("/api/firms/{firm_id}/get-next-invoice-id")
-def get_next_invoice_id(firm_id: str):
+async def get_next_invoice_id(firm_id: str):
     try:
         db_url = os.getenv("DATABASE_URL")
-        conn = psycopg2.connect(db_url)
-        cursor = conn.cursor()
-
-        # This securely pulls the next atomic number from Postgres
-        cursor.execute(
-            "SELECT next_invoice_number, firm_name FROM firm_settings WHERE id = %s::uuid;",
-            (firm_id,),
+        # asyncpg used
+        conn = await asyncpg.connect(db_url)
+        # asyncpg used
+        result = await conn.fetchrow(
+            """
+            UPDATE firm_settings 
+            SET next_invoice_number = next_invoice_number + 1 
+            WHERE id = $1::uuid 
+            RETURNING next_invoice_number - 1, firm_name;
+            """,
+            firm_id,
         )
-        result = cursor.fetchone()
 
         if result:
             next_val = result[0]
@@ -116,8 +120,9 @@ def get_next_invoice_id(firm_id: str):
             next_val = 1
             firm_name = "Unknown Firm"
 
-        cursor.close()
-        conn.close()
+        # asyncpg used
+        await conn.close()
+
         words = firm_name.strip().split()
         if len(words) >= 2:
             prefix = (words[0][0] + words[1][0]).upper()
@@ -143,14 +148,14 @@ async def prompt_to_invoice_generator(firm_id: str, response: PromptRequestModel
 
     client_directory_text = ""
     try:
-        conn = psycopg2.connect(DB_URL)
-        cursor = conn.cursor()
+        # asyncpg used
+        conn = await asyncpg.connect(DB_URL)
 
-        cursor.execute(
-            "SELECT name, address_line1, address_line2 FROM clients WHERE firm_id = %s::uuid LIMIT 50;",
-            (firm_id,),
+        # asyncpg used
+        clients = await conn.fetch(
+            "SELECT name, address_line1, address_line2 FROM clients WHERE firm_id = $1::uuid LIMIT 50;",
+            firm_id,
         )
-        clients = cursor.fetchall()
 
         if clients:
             directory_list = []
@@ -172,8 +177,8 @@ async def prompt_to_invoice_generator(firm_id: str, response: PromptRequestModel
                 + "\n".join(directory_list)
             )
 
-        cursor.close()
-        conn.close()
+        # asyncpg used
+        await conn.close()
     except Exception as e:
         print(f"⚠️ Could not fetch client directory: {e}")
         pass
@@ -229,32 +234,30 @@ async def prompt_to_invoice_generator(firm_id: str, response: PromptRequestModel
         if client_name and line1:
             print(f"🔍 Auto-saving client '{client_name}' to directory...")
             try:
-                conn = psycopg2.connect(DB_URL)
-                cursor = conn.cursor()
+                # asyncpg used
+                conn = await asyncpg.connect(DB_URL)
 
-                cursor.execute(
+                # asyncpg used
+                await conn.execute(
                     """
                     INSERT INTO clients 
                     (firm_id, created_by, name, address_line1, address_line2, address_line3) 
-                    VALUES (%s::uuid, %s::uuid, %s, %s, %s, %s)
+                    VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6)
                     ON CONFLICT DO NOTHING;
                     """,
-                    (
-                        firm_id,
-                        user_id,
-                        client_name,
-                        line1,
-                        line2,
-                        line3,
-                    ),
+                    firm_id,
+                    user_id,
+                    client_name,
+                    line1,
+                    line2,
+                    line3,
                 )
 
-                if cursor.rowcount > 0:
-                    print(f"✅ Successfully learned a new client: {client_name}!")
+                # asyncpg used
+                print(f"✅ Successfully learned a new client: {client_name}!")
 
-                conn.commit()
-                cursor.close()
-                conn.close()
+                # asyncpg used
+                await conn.close()
             except Exception as e:
                 print(f"⚠️ Failed to auto-save client background task: {e}")
 
@@ -276,7 +279,7 @@ async def prompt_to_invoice_generator(firm_id: str, response: PromptRequestModel
         ):
             print("⚠️ AI sent PENDING-ID! Fetching official ID from database...")
 
-            safe_id_data = get_next_invoice_id(firm_id)
+            safe_id_data = await get_next_invoice_id(firm_id)
 
             # If the database errored out, we catch it gracefully
             if "error" in safe_id_data:
@@ -305,26 +308,31 @@ async def prompt_to_invoice_generator(firm_id: str, response: PromptRequestModel
         try:
             print("🖨️  Fetching Firm Settings and sending data to Playwright engine...")
 
-            conn = psycopg2.connect(DB_URL)
-            cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            # asyncpg used
+            conn = await asyncpg.connect(DB_URL)
 
-            cursor.execute(
-                "SELECT * FROM firm_settings WHERE id = %s::uuid", (firm_id,)
+            # asyncpg used
+            firm_data_record = await conn.fetchrow(
+                "SELECT * FROM firm_settings WHERE id = $1::uuid", firm_id
             )
-            firm_data = cursor.fetchone()
 
-            if not firm_data:
+            # asyncpg used
+            if not firm_data_record:
                 firm_data = {"firm_name": "Unknown Firm"}
+            else:
+                firm_data = dict(firm_data_record)
 
-            cursor.close()
-            conn.close()
-            await anyio.to_thread.run_sync(
-                generate_invoice_pdf,
-                invoice_dict,
-                dict(firm_data),
-                response.user_name,
-                output_filename,
-            )
+            # asyncpg used
+            await conn.close()
+
+            async with PDF_SEMAPHORE:
+                await anyio.to_thread.run_sync(
+                    generate_invoice_pdf,
+                    invoice_dict,
+                    firm_data,
+                    response.user_name,
+                    output_filename,
+                )
         except Exception as e:
             print(f"PDF Generation error {e}")
             raise HTTPException(status_code=500, detail="Pdf couldnt be generated")
@@ -374,8 +382,8 @@ async def prompt_to_invoice_generator(firm_id: str, response: PromptRequestModel
 
         print("💾 Upserting EARNING to PostgreSQL ledger...")
         try:
-            conn = psycopg2.connect(DB_URL)
-            cursor = conn.cursor()
+            # asyncpg used
+            conn = await asyncpg.connect(DB_URL)
 
             services_list = invoice_dict.get("services", [])
             service_strings = [
@@ -386,11 +394,12 @@ async def prompt_to_invoice_generator(firm_id: str, response: PromptRequestModel
 
             invoice_id = invoice_dict.get("invoice_number", "INV-UNKNOWN")
 
-            cursor.execute(
+            # asyncpg used
+            await conn.execute(
                 """
                 INSERT INTO firm_financials 
                 (firm_id, created_by, transaction_type, amount, party_name, reference_file, description, invoice_id, created_at) 
-                VALUES (%s::uuid, %s::uuid, %s, %s, %s, %s, %s, %s, NOW())
+                VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, NOW())
                 ON CONFLICT (invoice_id) 
                 DO UPDATE SET 
                     amount = EXCLUDED.amount,
@@ -399,42 +408,22 @@ async def prompt_to_invoice_generator(firm_id: str, response: PromptRequestModel
                     reference_file = EXCLUDED.reference_file,
                     created_at = CURRENT_TIMESTAMP;
                 """,
-                (
-                    firm_id,
-                    user_id,
-                    "EARNING",
-                    safe_total,
-                    invoice_dict["client"]["name"],
-                    output_filename,
-                    detailed_description,
-                    invoice_id,
-                ),
+                firm_id,
+                user_id,
+                "EARNING",
+                safe_total,
+                invoice_dict["client"]["name"],
+                output_filename,
+                detailed_description,
+                invoice_id,
             )
-            conn.commit()
             print(f"✅ PostgreSQL record {invoice_id} upserted successfully!")
 
         except Exception as e:
             print(f"⚠️ Database Error: {e}")
 
-        try:
-            match = re.search(r"\d+", invoice_id)
-            if match:
-                used_num = int(match.group())
-                # Only bumps the DB counter if we actually successfully finalized this number!
-                cursor.execute(
-                    """
-                    UPDATE firm_settings 
-                    SET next_invoice_number = GREATEST(next_invoice_number, %s + 1)
-                    WHERE id = %s::uuid
-                    """,
-                    (used_num, firm_id),
-                )
-                conn.commit()
-        except Exception as e:
-            print(f"⚠️ Auto-bump Error: {e}")
-
-        cursor.close()
-        conn.close()
+        # asyncpg used
+        await conn.close()
 
         client_email = invoice_dict["client"].get("email")
         if client_email:
@@ -448,21 +437,20 @@ async def prompt_to_invoice_generator(firm_id: str, response: PromptRequestModel
 
     # --- LOG_EXPENSE MODE ---
     elif action == "log_expense":
-        conn = psycopg2.connect(DB_URL)
-        cursor = conn.cursor()
+        # asyncpg used
+        conn = await asyncpg.connect(DB_URL)
 
-        # 👇 Fetch and increment the firm-specific expense ID
-        cursor.execute(
+        # asyncpg used
+        result = await conn.fetchrow(
             """
             UPDATE firm_settings 
             SET next_expense_number = next_expense_number + 1 
-            WHERE id = %s::uuid 
+            WHERE id = $1::uuid 
             RETURNING next_expense_number - 1, firm_name;
             """,
-            (firm_id,),
+            firm_id,
         )
 
-        result = cursor.fetchone()
         if result:
             next_val = result[0]
             firm_name = result[1] or "EXP"
@@ -483,25 +471,24 @@ async def prompt_to_invoice_generator(firm_id: str, response: PromptRequestModel
 
         print("💾 Logging EXPENSE to PostgreSQL...")
 
-        # 👈 Injected firm_id and created_by into the financial record
-        cursor.execute(
+        # asyncpg used
+        await conn.execute(
             """
                 INSERT INTO firm_financials(
                 firm_id, created_by, transaction_type, amount, party_name, description, invoice_id, created_at) 
-                VALUES (%s::uuid, %s::uuid, %s, %s, %s, %s, %s, NOW())
+                VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, NOW())
                 """,
-            (
-                firm_id,
-                user_id,
-                "EXPENSE",
-                float(ai_json.get("amount", 0.0)),
-                ai_json.get("vendor_name", "Unknown Vendor"),
-                ai_json.get("description", "Firm Expense"),
-                expense_id,
-            ),
+            firm_id,
+            user_id,
+            "EXPENSE",
+            float(ai_json.get("amount", 0.0)),
+            ai_json.get("vendor_name", "Unknown Vendor"),
+            ai_json.get("description", "Firm Expense"),
+            expense_id,
         )
-        conn.commit()
-        conn.close()
+
+        # asyncpg used
+        await conn.close()
         return {
             "status": "success",
             "message": f"Successfully logged an expense of ₹{ai_json['amount']} to {ai_json['vendor_name']}.",
@@ -511,47 +498,44 @@ async def prompt_to_invoice_generator(firm_id: str, response: PromptRequestModel
     elif action == "analyze_financials":
         print("📊 Generating Financial Report...")
         try:
-            conn = psycopg2.connect(DB_URL)
-            cursor = conn.cursor()
+            # asyncpg used
+            conn = await asyncpg.connect(DB_URL)
 
-            # 👈 Locked down to firm_id
-            cursor.execute(
+            # asyncpg used
+            time_rows = await conn.fetch(
                 """
                 SELECT transaction_type, amount, party_name, created_at 
                 FROM firm_financials 
-                WHERE firm_id = %s::uuid 
+                WHERE firm_id = $1::uuid 
                 ORDER BY created_at DESC;
                 """,
-                (firm_id,),
+                firm_id,
             )
-            time_rows = cursor.fetchall()
 
-            # 👈 Locked down to firm_id
-            cursor.execute(
+            # asyncpg used
+            client_rows = await conn.fetch(
                 """
                 SELECT TO_CHAR(created_at, 'Mon YYYY'), COALESCE(party_name, 'Unknown'), SUM(amount) 
                 FROM firm_financials 
-                WHERE firm_id = %s::uuid AND transaction_type = 'EARNING' 
+                WHERE firm_id = $1::uuid AND transaction_type = 'EARNING' 
                 GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 50;
             """,
-                (firm_id,),
+                firm_id,
             )
-            client_rows = cursor.fetchall()
 
-            # 👈 Locked down to firm_id
-            cursor.execute(
+            # asyncpg used
+            expense_rows = await conn.fetch(
                 """
                 SELECT TO_CHAR(created_at, 'Mon YYYY'), COALESCE(party_name, 'General/Unknown'), SUM(amount) 
                 FROM firm_financials 
-                WHERE firm_id = %s::uuid AND transaction_type = 'EXPENSE' 
+                WHERE firm_id = $1::uuid AND transaction_type = 'EXPENSE' 
                 GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 50;
             """,
-                (firm_id,),
+                firm_id,
             )
-            expense_rows = cursor.fetchall()
 
-            cursor.close()
-            conn.close()
+            # asyncpg used
+            await conn.close()
 
             data_string = (
                 "--- OVERALL MONTHLY TRENDS ---\n"
@@ -600,18 +584,21 @@ async def prompt_to_invoice_generator(firm_id: str, response: PromptRequestModel
 @app.get("/api/firms/{firm_id}/settings")
 async def get_settings(firm_id: str):
     try:
-        conn = psycopg2.connect(DB_URL)
-        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        # asyncpg used
+        conn = await asyncpg.connect(DB_URL)
 
-        cursor.execute("SELECT * FROM firm_settings WHERE id = %s::uuid", (firm_id,))
-        settings = cursor.fetchone()
+        # asyncpg used
+        settings = await conn.fetchrow(
+            "SELECT * FROM firm_settings WHERE id = $1::uuid", firm_id
+        )
 
-        cursor.close()
-        conn.close()
+        # asyncpg used
+        await conn.close()
 
         if not settings:
             return {}
-        return settings
+        # asyncpg used
+        return dict(settings)
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -620,14 +607,15 @@ async def get_settings(firm_id: str):
 @app.post("/api/firms/{firm_id}/settings")
 async def update_settings(firm_id: str, settings: FirmSettings):
     try:
-        conn = psycopg2.connect(DB_URL)
-        cursor = conn.cursor()
+        # asyncpg used
+        conn = await asyncpg.connect(DB_URL)
 
-        cursor.execute(
+        # asyncpg used
+        await conn.execute(
             """
             INSERT INTO firm_settings 
             (id, firm_name, address_line1, address_line2, email_sender, bank_name, account_number, ifsc_code, logo_url, pan_number, contact_number, contact_email, bank_branch, updated_at) 
-            VALUES (%s::uuid, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+            VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW())
             ON CONFLICT (id) DO UPDATE SET 
                 firm_name = EXCLUDED.firm_name,
                 address_line1 = EXCLUDED.address_line1,
@@ -643,26 +631,23 @@ async def update_settings(firm_id: str, settings: FirmSettings):
                 bank_branch = EXCLUDED.bank_branch,
                 updated_at = NOW();
         """,
-            (
-                firm_id,
-                settings.firm_name,
-                settings.address_line1,
-                settings.address_line2,
-                settings.email_sender,
-                settings.bank_name,
-                settings.account_number,
-                settings.ifsc_code,
-                settings.logo_url,
-                settings.pan_number,
-                settings.contact_number,
-                settings.contact_email,
-                settings.bank_branch,
-            ),
+            firm_id,
+            settings.firm_name,
+            settings.address_line1,
+            settings.address_line2,
+            settings.email_sender,
+            settings.bank_name,
+            settings.account_number,
+            settings.ifsc_code,
+            settings.logo_url,
+            settings.pan_number,
+            settings.contact_number,
+            settings.contact_email,
+            settings.bank_branch,
         )
 
-        conn.commit()
-        cursor.close()
-        conn.close()
+        # asyncpg used
+        await conn.close()
 
         return {
             "status": "success",
