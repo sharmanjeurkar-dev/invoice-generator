@@ -90,6 +90,7 @@ app.add_middleware(
         "http://127.0.0.1:3000",
         "http://localhost:3001",
         "http://127.0.0.1:3001",
+        "https://ledgerai-smoky.vercel.app/",
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -145,7 +146,7 @@ async def get_next_invoice_id(firm_id: str):
         return {"error": str(e)}
 
 
-@app.post("/api/firms/{firm_id}/prompt-to-invoice")
+@app.post("/api/firms/{firm_id}/prompt-to-invoice", response_model=None)
 async def prompt_to_invoice_generator(
     firm_id: str, response: PromptRequestModel, background_tasks: BackgroundTask
 ):
