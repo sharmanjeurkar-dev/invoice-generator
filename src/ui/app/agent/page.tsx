@@ -20,7 +20,7 @@ import {
   User,
   LogOut // 👈 Added LogOut icon
 } from "lucide-react";
-import { useSession, signOut } from "../lib/auth"; // 👈 Imported Better Auth
+import { useSession, signOut } from "./../lib/auth"; // 👈 Imported Better Auth
 
 type Role = "user" | "ai";
 
