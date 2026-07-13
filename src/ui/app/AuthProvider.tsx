@@ -5,7 +5,7 @@ import { supabase } from "./lib/supabaseClient"; // Adjust path if needed
 import { useFirmStore } from "../store/useFirmStore"; // Adjust path if needed
 
 export default function AuthProvider({ children }: { children: React.ReactNode }) {
-  const { setAuth, setLoading } = useFirmStore();
+  const setAuth = useFirmStore((state) => state.setAuth);
 
   useEffect(() => {
     // 👇 Added a "retries" parameter to handle the database delay
