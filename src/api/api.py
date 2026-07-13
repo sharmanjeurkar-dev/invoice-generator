@@ -14,6 +14,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from pydantic import BaseModel
+from starlette.background import BackgroundTask
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.abspath(os.path.join(script_dir, ".."))
@@ -145,7 +146,9 @@ async def get_next_invoice_id(firm_id: str):
 
 
 @app.post("/api/firms/{firm_id}/prompt-to-invoice")
-async def prompt_to_invoice_generator(firm_id: str, response: PromptRequestModel):
+async def prompt_to_invoice_generator(
+    firm_id: str, response: PromptRequestModel, background_tasks: BackgroundTask
+):
     invoice_id = str(uuid.uuid4())[:8]
     expense_id = str(uuid.uuid4())[:8]
     prompt = str(response.prompt)
@@ -457,12 +460,17 @@ async def prompt_to_invoice_generator(firm_id: str, response: PromptRequestModel
 
         client_email = invoice_dict["client"].get("email")
         if client_email:
+            if os.path.exists(file_path):
+                os.remove(file_path)
             return {
                 "status": "success",
                 "message": f"Invoice {invoice_id} successfully finalized and emailed to {client_email}.",
             }
         return FileResponse(
-            path=file_path, filename=output_filename, media_type="application/pdf"
+            path=file_path,
+            filename=output_filename,
+            media_type="application/pdf",
+            background=BackgroundTask(os.remove, file_path),
         )
 
     # --- LOG_EXPENSE MODE ---
