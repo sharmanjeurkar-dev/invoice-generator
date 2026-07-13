@@ -176,11 +176,11 @@ const [user_name, setUserName] = useState("User");
       console.error("Failed to download charts:", err);
     }
   };
-
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
   const fetchNewInvoiceId = useCallback(async () => {
     if (!firmId) return; 
     try {
-      const res = await fetch(`http://127.0.0.1:8000/api/firms/${firmId}/get-next-invoice-id`);
+      const res = await fetch(`${apiUrl}/api/firms/${firmId}/get-next-invoice-id`);
       const data = await res.json();
       if (data.invoice_id) {
         invoiceIdRef.current = data.invoice_id;
@@ -237,10 +237,10 @@ const [user_name, setUserName] = useState("User");
 
     // 1. Trigger the staggered loading sequence
     setIsLoading(true);
-
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
     try {
       const response = await fetch(
-        `http://127.0.0.1:8000/api/firms/${firmId}/prompt-to-invoice`,
+        `${apiUrl}/api/firms/${firmId}/prompt-to-invoice`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
