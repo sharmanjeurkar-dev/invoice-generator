@@ -147,9 +147,7 @@ async def get_next_invoice_id(firm_id: str):
 
 
 @app.post("/api/firms/{firm_id}/prompt-to-invoice", response_model=None)
-async def prompt_to_invoice_generator(
-    firm_id: str, response: PromptRequestModel, background_tasks: BackgroundTask
-):
+async def prompt_to_invoice_generator(firm_id: str, response: PromptRequestModel):
     invoice_id = str(uuid.uuid4())[:8]
     expense_id = str(uuid.uuid4())[:8]
     prompt = str(response.prompt)
