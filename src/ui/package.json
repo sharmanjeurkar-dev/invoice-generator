@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.110.1",
+    "better-auth": "^1.6.23",
     "dotenv": "^17.4.2",
     "html2canvas": "^1.4.1",
     "lucide-react": "^1.21.0",

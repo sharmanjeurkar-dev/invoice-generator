@@ -17,9 +17,10 @@ import {
   FileDown,
   Sparkles,
   Settings,
-  User
+  User,
+  LogOut // 👈 Added LogOut icon
 } from "lucide-react";
-import { supabase } from "../lib/supabaseClient"; 
+import { useSession, signOut } from "../lib/auth"; // 👈 Imported Better Auth
 
 type Role = "user" | "ai";
 
@@ -60,38 +61,16 @@ function formatYAxisValue(value: number) {
   return `₹${value}`;
 }
 
-// 1. Made this a standard component (removed export default)
 function DashboardHeader() {
-  const [userName, setUserName] = useState("User");
+  // 👈 Much cleaner! We just grab the user straight from the session
+  const { data: session } = useSession();
+  
+  const userName = session?.user?.name || session?.user?.email?.split('@')[0] || "User";
 
- useEffect(() => {
-    const fetchUserProfile = async () => {
-      // 1. Get the current user ID
-      const { data: { user }, error: authError } = await supabase.auth.getUser();
-      if (authError || !user) return;
-
-      // 2. Query the public.profiles table for their exact name!
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("full_name")
-        .eq("id", user.id)
-        .single();
-
-      if (error) {
-        console.error("Error fetching profile:", error.message);
-      }
-
-      // 3. Set the name, or fallback to the email if it's empty
-      if (data?.full_name) {
-        setUserName(data.full_name);
-      } else {
-        const emailName = user.email?.split('@')[0] || "User";
-        setUserName(emailName);
-      }
-    };
-
-    fetchUserProfile();
-  }, []);
+  const handleLogout = async () => {
+    await signOut();
+    window.location.href = "/login";
+  };
 
   return (
     <header className="flex justify-between items-center p-4 bg-white border-b border-[#e5e7eb] shadow-sm">
@@ -99,23 +78,35 @@ function DashboardHeader() {
         Ledger
       </div>
       
-      <div className="flex items-center gap-2">
-        <div className="w-8 h-8 rounded-full bg-[#1f3864]/10 flex items-center justify-center">
-          <User className="w-4 h-4 text-[#1f3864]" />
+      <div className="flex items-center gap-4">
+        <div className="flex items-center gap-2">
+          <div className="w-8 h-8 rounded-full bg-[#1f3864]/10 flex items-center justify-center">
+            <User className="w-4 h-4 text-[#1f3864]" />
+          </div>
+          <span className="text-sm font-medium text-[#374151]">
+            {userName}
+          </span>
         </div>
-        <span className="text-sm font-medium text-[#374151]">
-          {userName}
-        </span>
+        
+        {/* 👈 Secure Sign Out Button */}
+        <button 
+          onClick={handleLogout}
+          className="p-2 text-[#6b7280] hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+          title="Sign Out"
+        >
+          <LogOut className="w-4 h-4" />
+        </button>
       </div>
     </header>
   );
 }
 
-// 2. This remains the single default export for the page
 export default function InvoiceGeneratorPage() {
   
   const { firmId, userId, isLoading: isFirmLoading } = useFirmStore();
-const [user_name, setUserName] = useState("User");
+  const { data: session } = useSession(); // 👈 Grab session here too
+  
+  const [user_name, setUserName] = useState("User");
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [status, setStatus] = useState<Status>("idle");
@@ -135,27 +126,28 @@ const [user_name, setUserName] = useState("User");
     "Finalizing ledger entry...",
     "Securing final files..."
   ];
+
   useEffect(() => {
     let interval: NodeJS.Timeout;
     
     if (isLoading) {
       let stepIndex = 0;
-      setLoadingText(loadingSteps[0]); // Set the first message instantly
+      setLoadingText(loadingSteps[0]); 
       
       interval = setInterval(() => {
         stepIndex++;
         if (stepIndex < loadingSteps.length) {
           setLoadingText(loadingSteps[stepIndex]);
         } else {
-          // If the backend takes longer than expected, stay on the last message
           setLoadingText(loadingSteps[loadingSteps.length - 1]);
           clearInterval(interval); 
         }
-      }, 5000); // 5 seconds per step perfectly matches an 8-12 sec backend
+      }, 5000); 
     }
 
-    return () => clearInterval(interval); // Cleanup to prevent memory leaks
+    return () => clearInterval(interval); 
   }, [isLoading]);
+
   const handleDownloadDashboard = async (elementId: string) => {
     const element = document.getElementById(elementId);
     if (!element) return;
@@ -176,7 +168,9 @@ const [user_name, setUserName] = useState("User");
       console.error("Failed to download charts:", err);
     }
   };
+
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+  
   const fetchNewInvoiceId = useCallback(async () => {
     if (!firmId) return; 
     try {
@@ -189,25 +183,16 @@ const [user_name, setUserName] = useState("User");
     } catch (err) {
       console.error("Failed to fetch ID", err); 
     }
-  }, [firmId]);
+  }, [firmId, apiUrl]);
 
+  // 👈 Instantly set the name from Better Auth session instead of DB query
   useEffect(() => {
-    if (!userId) return;
-    
-    const fetchName = async () => {
-      const { data } = await supabase
-        .from("profiles")
-        .select("full_name")
-        .eq("id", userId)
-        .single();
-        
-      if (data?.full_name) {
-        setUserName(data.full_name);
-      }
-    };
-    
-    fetchName();
-  }, [userId]);
+    if (session?.user?.name) {
+      setUserName(session.user.name);
+    } else if (session?.user?.email) {
+      setUserName(session.user.email.split('@')[0]);
+    }
+  }, [session]);
 
   useEffect(() => {
     chatBottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -235,9 +220,7 @@ const [user_name, setUserName] = useState("User");
 
     const promptPayload = buildPromptPayload(previousMessages, text, invoiceIdRef.current);
 
-    // 1. Trigger the staggered loading sequence
     setIsLoading(true);
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
     try {
       const response = await fetch(
         `${apiUrl}/api/firms/${firmId}/prompt-to-invoice`,
@@ -327,7 +310,6 @@ const [user_name, setUserName] = useState("User");
       );
       setStatus("error");
     } finally {
-      // 2. Shut off the loading sequence safely, regardless of success or failure
       setIsLoading(false);
     }
   };
@@ -374,13 +356,8 @@ const [user_name, setUserName] = useState("User");
   }
 
   return (
-    // 3. Wrapped the entire page to stack the header and the main content
     <div className="min-h-screen flex flex-col bg-[#F7F7F5] font-sans">
-      
-      {/* 4. Injected the header at the top */}
       <DashboardHeader />
-
-      {/* 5. Set the main section to flex-1 so it takes up the remaining height */}
       <main className="flex-1 flex flex-col items-center justify-center px-4 py-10">
         <div className="mb-6 text-center relative w-full max-w-4xl">
           <div className="absolute right-0 top-0">
@@ -542,23 +519,19 @@ const [user_name, setUserName] = useState("User");
               </div>
             ))}
 
-  
-            {/* Render the dynamic loading bubble */}
-        {isLoading && (
-          <div className="flex justify-start mb-4">
-            <div className="bg-gray-100 text-gray-600 rounded-2xl px-5 py-3 text-[14px] flex items-center gap-3 shadow-sm border border-gray-200">
-              {/* Spinning SVG Icon */}
-              <svg className="animate-spin h-4 w-4 text-gray-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-              </svg>
-              {/* The dynamic text! */}
-              <span className="font-medium tracking-wide">
-                {loadingText}
-              </span>
-            </div>
-          </div>
-        )}
+            {isLoading && (
+              <div className="flex justify-start mb-4">
+                <div className="bg-gray-100 text-gray-600 rounded-2xl px-5 py-3 text-[14px] flex items-center gap-3 shadow-sm border border-gray-200">
+                  <svg className="animate-spin h-4 w-4 text-gray-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  <span className="font-medium tracking-wide">
+                    {loadingText}
+                  </span>
+                </div>
+              </div>
+            )}
 
             {status === "success" && (
               <div className="flex justify-start">
