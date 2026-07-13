@@ -480,7 +480,11 @@ const [user_name, setUserName] = useState("User");
                                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f3f4f6" />
                                     <XAxis dataKey={chart.x_key || "period"} stroke="#6b7280" fontSize={11} tickLine={false} axisLine={false} dy={10} />
                                     <YAxis stroke="#6b7280" fontSize={11} tickLine={false} axisLine={false} tickFormatter={formatYAxisValue} width={50}/>
-                                    <Tooltip cursor={{ fill: '#f9fafb' }} contentStyle={{ borderRadius: '8px', border: '1px solid #e5e7eb', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', fontSize: '13px' }} formatter={(v: number) => [`₹${v.toLocaleString()}`, undefined]} />
+                                    <Tooltip 
+                                      cursor={{ fill: '#f9fafb' }} 
+                                      contentStyle={{ borderRadius: '8px', border: '1px solid #e5e7eb', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', fontSize: '13px' }} 
+                                      formatter={(v: any) => [`₹${Number(v).toLocaleString()}`, undefined]} 
+                                    />
                                     <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '15px' }} />
                                     {chart.data_keys?.map((key: string, i: number) => (
                                       <Bar key={key} name={key} dataKey={key} fill={COLORS[i % COLORS.length]} radius={[4, 4, 0, 0]} maxBarSize={45} />
@@ -491,7 +495,10 @@ const [user_name, setUserName] = useState("User");
                                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f3f4f6" />
                                     <XAxis dataKey={chart.x_key || "period"} stroke="#6b7280" fontSize={11} tickLine={false} axisLine={false} dy={10} />
                                     <YAxis stroke="#6b7280" fontSize={11} tickLine={false} axisLine={false} tickFormatter={formatYAxisValue} width={50}/>
-                                    <Tooltip contentStyle={{ borderRadius: '8px', border: '1px solid #e5e7eb', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', fontSize: '13px' }} formatter={(v: number) => [`₹${v.toLocaleString()}`, undefined]} />
+                                   <Tooltip 
+                                      contentStyle={{ borderRadius: '8px', border: '1px solid #e5e7eb', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', fontSize: '13px' }} 
+                                      formatter={(v: any) => [`₹${Number(v).toLocaleString()}`, undefined]} 
+                                    />
                                     <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '15px' }} />
                                     {chart.data_keys?.map((key: string, i: number) => (
                                       <Line key={key} type="monotone" name={key} dataKey={key} stroke={COLORS[i % COLORS.length]} strokeWidth={2.5} dot={{ r: 4 }} activeDot={{ r: 6 }} />
@@ -504,7 +511,10 @@ const [user_name, setUserName] = useState("User");
                                         <Cell key={`cell-${i}`} fill={COLORS[i % COLORS.length]} />
                                       ))}
                                     </Pie>
-                                    <Tooltip contentStyle={{ borderRadius: '8px', border: '1px solid #e5e7eb', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', fontSize: '13px' }} formatter={(v: number) => `₹${v.toLocaleString()}`} />
+                                    <Tooltip 
+                                    contentStyle={{ borderRadius: '8px', border: '1px solid #e5e7eb', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', fontSize: '13px' }} 
+                                    formatter={(v: any) => `₹${Number(v).toLocaleString()}`} 
+                                  />
                                     <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '15px' }} />
                                   </PieChart>
                                 )}
