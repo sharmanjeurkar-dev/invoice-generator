@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import { useSession } from "../lib/auth"; // Your new Better Auth client
+import { useSession } from "./lib/auth"; // Your new Better Auth client
 import { useFirmStore } from "../store/useFirmStore";
 
 export default function AuthProvider({ children }: { children: React.ReactNode }) {
