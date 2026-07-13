@@ -579,10 +579,12 @@ async def prompt_to_invoice_generator(firm_id: str, response: PromptRequestModel
             )
 
             analyst_prompt = (
-                f"[SYSTEM NOTE: RAW FINANCIAL DATA]\n"
-                f"USER'S SPECIFIC REQUEST: {prompt}\n\n"
-                f"Here is the pre-aggregated database. Filter these summaries based on the user's requested timeframe and build the requested charts.\n\n"
-                f"{data_string}"
+                "[SYSTEM NOTE: RAW FINANCIAL DATA]\n"
+                f"<user_request>\n{prompt}\n</user_request>\n\n"
+                "<instruction>\n"
+                "Filter the summaries below based on the user's requested timeframe and build the requested charts.\n"
+                "</instruction>\n\n"
+                f"<financial_data>\n{data_string}\n</financial_data>"
             )
 
             print("🧠 Sending raw data back to AI for analysis...")
