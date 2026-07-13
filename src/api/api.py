@@ -152,34 +152,49 @@ async def prompt_to_invoice_generator(firm_id: str, response: PromptRequestModel
     user_id = response.user_id
 
     client_directory_text = ""
+    print(f"🔍 DEBUG: API called with firm_id: {firm_id}")
     try:
         # asyncpg used
         conn = await asyncpg.connect(DB_URL, statement_cache_size=0)
 
         # asyncpg used
         clients = await conn.fetch(
-            "SELECT name, address_line1, address_line2 FROM clients WHERE firm_id = $1::uuid LIMIT 50;",
+            """
+            SELECT name, address_line1, address_line2, address_line3 
+            FROM clients 
+            WHERE firm_id = $1::uuid 
+            AND (
+                $2 ILIKE '%' || name || '%'  -- Checks if the client's name is inside the prompt
+                OR name ILIKE '%' || $2 || '%' 
+            )
+            UNION
+            SELECT name, address_line1, address_line2, address_line3 
+            FROM clients 
+            WHERE firm_id = $1::uuid 
+            ORDER BY name 
+            LIMIT 50; 
+            """,
             firm_id,
+            prompt,  # Pass the raw user text directly to PostgreSQL!
         )
-
+        print(f"🔍 DEBUG: Found {len(clients)} clients for this firm.")
         if clients:
             directory_list = []
             for c in clients:
                 name = c[0]
-                # Filter out 'None' values so the AI doesn't get confused
                 l1 = c[1] if c[1] else ""
                 l2 = c[2] if c[2] else ""
                 full_addr = f"{l1}, {l2}".strip(", ")
 
                 if full_addr:
-                    directory_list.append(f"Client '{name}': {full_addr}")
+                    directory_list.append(f"- {name}: {full_addr}")
 
             client_directory_text = (
-                "\n\n[SYSTEM NOTE: KNOWN CLIENT DIRECTORY]\n"
-                "CRITICAL INSTRUCTION: If the user requests an invoice for a client named below, "
-                "you MUST extract their address from this directory and populate the 'client.address' fields in your JSON. "
-                "DO NOT leave the address null or blank if the client is listed here!\n"
+                "\n\n<database_context>\n"
+                "KNOWN CLIENT DIRECTORY:\n"
                 + "\n".join(directory_list)
+                + "\n</database_context>\n"
+                "SYSTEM RULE: If the requested client is in the <database_context> above, you MUST extract their exact address for the JSON."
             )
 
         # asyncpg used
@@ -188,8 +203,16 @@ async def prompt_to_invoice_generator(firm_id: str, response: PromptRequestModel
         print(f"⚠️ Could not fetch client directory: {e}")
         pass
 
-    email_enforcement = "\n\n[SYSTEM NOTE: If the user provides an email address anywhere in their request, you MUST extract it and place it in the 'client.email' field of your JSON response. Do not leave it null if an email is present.]"
-    financial_enforcement = "\n\n[CRITICAL INSTRUCTION: By default, set 'gst' to 0.0 and ensure 'total' equals 'subtotal'. ONLY calculate and add GST if the user explicitly asks for it (e.g., 'with GST' or 'add 18% tax').]"
+    email_enforcement = (
+        "\n\n<email_extraction_rule>\n"
+        "If the user provides an email address anywhere in their request, you MUST extract it and place it in the 'client.email' field of your JSON response. Do not leave it null if an email is present.\n"
+        "</email_extraction_rule>"
+    )
+    financial_enforcement = (
+        "\n\n<financial_calculation_rule>\n"
+        "By default, set 'gst' to 0.0 and ensure 'total' equals 'subtotal'. ONLY calculate and add GST if the user explicitly asks for it (e.g., 'with GST' or 'add 18% tax').\n"
+        "</financial_calculation_rule>"
+    )
     enriched_prompt = (
         prompt + client_directory_text + email_enforcement + financial_enforcement
     )
@@ -239,18 +262,17 @@ async def prompt_to_invoice_generator(firm_id: str, response: PromptRequestModel
         line3 = address.get("line3", "")
 
         if client_name and line1:
-            print(f"🔍 Auto-saving client '{client_name}' to directory...")
             try:
-                # asyncpg used
                 conn = await asyncpg.connect(DB_URL, statement_cache_size=0)
 
-                # asyncpg used
-                await conn.execute(
+                # Use fetchrow and RETURNING to see if it actually inserted
+                inserted_row = await conn.fetchrow(
                     """
                     INSERT INTO clients 
                     (firm_id, created_by, name, address_line1, address_line2, address_line3) 
                     VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6)
-                    ON CONFLICT DO NOTHING;
+                    ON CONFLICT DO NOTHING
+                    RETURNING name;
                     """,
                     firm_id,
                     user_id,
@@ -260,10 +282,11 @@ async def prompt_to_invoice_generator(firm_id: str, response: PromptRequestModel
                     line3,
                 )
 
-                # asyncpg used
-                print(f"✅ Successfully learned a new client: {client_name}!")
+                if inserted_row:
+                    print(f"✅ Successfully learned a new client: {client_name}!")
+                else:
+                    print(f"🔄 Used existing client profile for: {client_name}")
 
-                # asyncpg used
                 await conn.close()
             except Exception as e:
                 print(f"⚠️ Failed to auto-save client background task: {e}")
@@ -587,6 +610,63 @@ async def prompt_to_invoice_generator(firm_id: str, response: PromptRequestModel
             print(f"Analyst Loop Error: {e}")
             raise HTTPException(
                 status_code=500, detail=f"Failed to analyze data: {str(e)}"
+            )
+        # --- UPDATE CLIENT MODE ---
+    elif action == "update_client":
+        client_name = ai_json.get("client_name")
+        new_address = ai_json.get("new_address", {})
+
+        if not client_name:
+            return JSONResponse(
+                content={
+                    "status": "error",
+                    "message": "Client name is missing for the update.",
+                }
+            )
+
+        line1 = new_address.get("line1", "")
+        line2 = new_address.get("line2", "")
+        line3 = new_address.get("line3", "")
+
+        print(f"🔄 Attempting to update client: {client_name}")
+
+        try:
+            conn = await asyncpg.connect(DB_URL, statement_cache_size=0)
+
+            # ILIKE makes the search case-insensitive (e.g., "sanjay" matches "Sanjay")
+            existing_client = await conn.fetchrow(
+                "SELECT id FROM clients WHERE firm_id = $1::uuid AND name ILIKE $2",
+                firm_id,
+                client_name,
+            )
+
+            if existing_client:
+                await conn.execute(
+                    """
+                    UPDATE clients 
+                    SET address_line1 = $1, address_line2 = $2, address_line3 = $3 
+                    WHERE firm_id = $4::uuid AND name ILIKE $5
+                    """,
+                    line1,
+                    line2,
+                    line3,
+                    firm_id,
+                    client_name,
+                )
+                msg = f"Successfully updated the address for {client_name} in your directory."
+            else:
+                msg = f"I couldn't find a client named '{client_name}' in your directory to update."
+
+            await conn.close()
+            return JSONResponse(content={"status": "success", "message": msg})
+
+        except Exception as e:
+            print(f"⚠️ Database Error during client update: {e}")
+            return JSONResponse(
+                content={
+                    "status": "error",
+                    "message": "Database error while updating the client.",
+                }
             )
 
 
