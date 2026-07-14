@@ -1,12 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { signIn, signUp } from "./../lib/auth"; // 👈 Swap to our new Better Auth client
+import { supabase } from "../lib/supabaseClient"; 
 import { Scale, Mail, Lock, Loader2, Eye, EyeOff, User } from "lucide-react";
 
 export default function LoginPage() {
   const [isLogin, setIsLogin] = useState(true);
-  const [firmName, setFirmName] = useState("");
+  const [firmName, setFirmName] = useState("")
   const [name, setName] = useState(""); 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -23,26 +23,21 @@ export default function LoginPage() {
 
     try {
       if (isLogin) {
-        // 👈 Better Auth syntax for login
-        const { data, error } = await signIn.email({ 
-          email, 
-          password 
-        });
-        
+        const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
         window.location.href = "/agent";
       } else {
-        // 👈 Better Auth syntax for signup
-        const { data, error } = await signUp.email({ 
+        // 👈 Passed the name securely into Supabase's user_metadata
+       const { error } = await supabase.auth.signUp({ 
           email, 
           password,
-          name: name, // Better Auth natively uses 'name' at the top level
-          
-          // If you set up firm_name as a custom field in Neon Auth, 
-          // you pass it right here at the root level!
-          firm_name: firmName 
+          options: {
+            data: {
+              full_name: name,
+              firm_name: firmName // 👈 Send the firm name to the SQL trigger!
+            }
+          }
         });
-        
         if (error) throw error;
         window.location.href = "/settings";
       }

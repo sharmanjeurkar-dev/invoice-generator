@@ -1,29 +1,26 @@
 "use client";
 
 import { useEffect } from "react";
-import { useSession } from "./lib/auth"; // Your new Better Auth client
-import { useFirmStore } from "../store/useFirmStore";
+import { supabase } from "./lib/supabaseClient"; // Adjust path if needed
+import { useFirmStore } from "../store/useFirmStore"; // Adjust path if needed
 
 export default function AuthProvider({ children }: { children: React.ReactNode }) {
   const setAuth = useFirmStore((state) => state.setAuth);
-  
-  // Better Auth's hook automatically listens for login/logout events!
-  const { data: sessionData, isPending } = useSession();
 
   useEffect(() => {
-    // 👇 Your original retry architecture remains perfectly intact
+    // 👇 Added a "retries" parameter to handle the database delay
     const loadUserData = async (userId: string, retries = 3) => {
       try {
-        // We ask Python for the firm_id instead of querying the DB directly
-        const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
-        const response = await fetch(`${apiUrl}/api/users/${userId}/profile`);
+        const { data, error } = await supabase
+          .from("profiles")
+          .select("firm_id")
+          .eq("id", userId)
+          .maybeSingle(); 
 
-        if (!response.ok) throw new Error("Profile API failed");
+        if (error) throw error;
         
-        const data = await response.json();
-        
-        // Trigger the retry loop if it's empty
-        if (!data || !data.firm_id) throw new Error("Profile not created yet"); 
+        // 👇 Add this check to trigger the retry loop if it's empty
+        if (!data) throw new Error("Profile not created yet"); 
         
         // Success! We got the firm ID.
         setAuth(userId, data.firm_id);
@@ -41,20 +38,26 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
       }
     };
 
-    // If Better Auth is still booting up, do nothing yet
-    if (isPending) return;
+    // Check if already logged in on initial load
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user) {
+        loadUserData(session.user.id);
+      } else {
+        setAuth(null, null);
+      }
+    });
 
-    // Check if the user is logged in
-    if (sessionData?.user) {
-      loadUserData(sessionData.user.id);
-    } else {
-      // Not logged in, clear everything
-      setAuth(null, null);
-    }
-    
-    // We don't need a cleanup subscription return anymore because 
-    // the useSession hook manages all the unmounting invisibly!
-  }, [sessionData, isPending, setAuth]);
+    // Listen for login/logout events
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.user) {
+        loadUserData(session.user.id);
+      } else {
+        setAuth(null, null);
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, [setAuth]);
 
   return <>{children}</>;
 }
