@@ -50,8 +50,6 @@ def generate_invoice_pdf(
         invoice=invoice_dict, firm=firm_dict, user_name=user_name
     )
 
-    output_path = os.path.join(project_root, output_filename)
-
     print("🌐 Spinning up headless browser...")
     with sync_playwright() as p:
         browser = p.chromium.launch(
