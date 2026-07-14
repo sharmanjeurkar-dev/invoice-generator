@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@supabase/supabase-js";
-import { useFirmStore } from "../../store/useFirmStore";
+import { useFirmStore } from "../../store/useFirmStore"; // Adjust path if needed
 
 import {
   Building2,
@@ -16,17 +16,15 @@ import {
   AlertCircle,
 } from "lucide-react";
 
-// --- Supabase client (Now strictly used ONLY for Logo Storage!) ---
+// --- Supabase client -------------------------------------------------------
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-// Initialize Supabase only if the keys are present to prevent crashes
-const supabase = createClient(
-  SUPABASE_URL || "https://placeholder.supabase.co", 
-  SUPABASE_ANON_KEY || "placeholder"
-);
+const supabase = createClient(SUPABASE_URL as string, SUPABASE_ANON_KEY as string);
 
 const ACCENT = "#1f3864";
+
+// --- Small building blocks ---------------------------------------------------
 
 function SectionHeader({ icon: Icon, title, description }: any) {
   return (
@@ -66,10 +64,12 @@ function Field({ label, name, value, onChange, placeholder, type = "text" }: any
   );
 }
 
+// --- Main component ----------------------------------------------------------
+
 export default function SettingsPage() {
   const router = useRouter();
   
-  // The AuthProvider we built in Phase 2 handles populating this!
+  // 👇 Pull the dynamic firmId and loading state from Zustand
   const { firmId, isLoading: isFirmLoading } = useFirmStore();
 
   const [form, setForm] = useState({
@@ -93,16 +93,16 @@ export default function SettingsPage() {
   const [showSuccess, setShowSuccess] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
 
+  // Fetch existing settings on mount (only runs when firmId is ready)
   useEffect(() => {
     let cancelled = false;
 
     async function fetchSettings() {
-      if (!firmId) return; 
+      if (!firmId) return; // Wait until we have the ID
 
       try {
-        // 👇 Dynamic API URL for Vercel deployment
-        const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
-        const res = await fetch(`${apiUrl}/api/firms/${firmId}/settings`, { 
+        // 👇 Fixed the template literal to use the dynamic ${firmId}
+        const res = await fetch(`http://127.0.0.1:8000/api/firms/${firmId}/settings`, { 
           method: "GET" 
         });
         
@@ -137,31 +137,32 @@ export default function SettingsPage() {
 
   const handleLogoUpload = useCallback(async (e: any) => {
     const file = e.target.files?.[0];
-    if (!file || !firmId) return; 
-
-    if (!SUPABASE_URL) {
-      setErrorMsg("Storage keys missing. Cannot upload logo.");
-      return;
-    }
+    if (!file || !firmId) return; // Safety check for the file and the firmId
 
     setUploading(true);
     setErrorMsg("");
 
     try {
+      
       if (form.logo_url) {
+        // Grab just the filename from the very end of the Supabase public URL
         const oldFileName = form.logo_url.split("/").pop();
+        
         if (oldFileName) {
+          // Tell Supabase to permanently delete this specific file from the bucket
           await supabase.storage.from("Logos").remove([oldFileName]);
         }
       }
 
+      // 👇 2. UPLOAD THE NEW LOGO
       const fileExt = file.name.split(".").pop();
+      // Bonus: Add the firmId to the filename so your bucket stays highly organized!
       const fileName = `firm-${firmId}-${Date.now()}.${fileExt}`;
 
       const { error: uploadError } = await supabase.storage
         .from("Logos")
         .upload(fileName, file, {
-          upsert: true 
+          upsert: true // Ensures it overwrites gracefully
         });
 
       if (uploadError) throw uploadError;
@@ -189,9 +190,7 @@ export default function SettingsPage() {
     setErrorMsg("");
 
     try {
-      // 👇 Dynamic API URL for Vercel deployment
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
-      const res = await fetch(`${apiUrl}/api/firms/${firmId}/settings`, {
+      const res = await fetch(`http://127.0.0.1:8000/api/firms/${firmId}/settings`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(form),
@@ -201,6 +200,7 @@ export default function SettingsPage() {
 
       setShowSuccess(true);
       
+      // 👇 Wait 1 second to show success message, then redirect to /agent
       setTimeout(() => {
         router.push("/agent");
       }, 1000);
@@ -212,6 +212,7 @@ export default function SettingsPage() {
     }
   }, [form, firmId, router]);
 
+  // Show a loading screen while Zustand connects to Supabase
   if (isFirmLoading) {
     return (
       <div className="min-h-screen w-full flex justify-center items-center bg-[#F7F7F5]">
@@ -226,6 +227,7 @@ export default function SettingsPage() {
       style={{ backgroundColor: "#F7F7F5" }}
     >
       <div className="w-full max-w-3xl">
+        {/* Page heading */}
         <div className="mb-6 px-1">
           <h1 className="text-[22px] font-semibold text-[#1a1a1a]">
             Firm Settings & Setup
@@ -235,6 +237,7 @@ export default function SettingsPage() {
           </p>
         </div>
 
+        {/* Card */}
         <div className="relative bg-white border border-[#e5e7eb] rounded-2xl shadow-sm overflow-hidden">
           {loadingSettings && (
             <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/70 backdrop-blur-[1px]">
@@ -409,6 +412,7 @@ export default function SettingsPage() {
             </section>
           </div>
 
+          {/* Footer / Save bar */}
           <div className="flex items-center justify-between gap-4 border-t border-[#e5e7eb] bg-[#F7F7F5]/60 px-6 sm:px-8 py-4">
             <div className="min-h-[20px] flex items-center gap-2">
               {errorMsg && (

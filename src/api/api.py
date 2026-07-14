@@ -11,7 +11,6 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
-from mangum import Mangum
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from pydantic import BaseModel
@@ -102,38 +101,6 @@ app.add_middleware(
 load_dotenv()
 DB_URL = os.getenv("DATABASE_URL")
 PDF_SEMAPHORE = asyncio.Semaphore(3)
-handeler = Mangum(app=app)
-
-
-@app.get("/api/users/{user_id}/profile")
-async def get_user_profile(user_id: str):
-    """
-    Securely fetches the firm_id for a given user from the Neon database.
-    This replaces the direct frontend Supabase queries.
-    """
-    try:
-        # Connect to the Neon database
-        conn = await asyncpg.connect(DB_URL, statement_cache_size=0)
-
-        # Query the profiles table for the firm_id
-        profile = await conn.fetchrow(
-            "SELECT firm_id FROM profiles WHERE id = $1::uuid", user_id
-        )
-
-        await conn.close()
-
-        if profile and profile["firm_id"]:
-            # asyncpg returns UUID objects, so we cast it to a string for JSON compatibility
-            return {"firm_id": str(profile["firm_id"])}
-
-        # If no profile or firm_id is found, alert the frontend
-        raise HTTPException(status_code=404, detail="Profile or firm_id not found")
-
-    except Exception as e:
-        print(f"🚨 Error fetching user profile: {e}")
-        raise HTTPException(
-            status_code=500, detail="Internal server error while fetching profile"
-        )
 
 
 @app.get("/api/firms/{firm_id}/get-next-invoice-id")
