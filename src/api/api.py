@@ -373,8 +373,8 @@ async def prompt_to_invoice_generator(firm_id: str, response: PromptRequestModel
 
         current_dir = os.path.dirname(os.path.abspath(__file__))
         project_root = os.path.abspath(os.path.join(current_dir, "..", ".."))
-        file_path = os.path.join(project_root, output_filename)
-
+        output_dir = "/tmp" if os.getenv("AWS_LAMBDA_FUNCTION_NAME") else project_root
+        file_path = os.path.join(output_dir, output_filename)
         email_status_msg = None
 
         if not os.path.exists(file_path):

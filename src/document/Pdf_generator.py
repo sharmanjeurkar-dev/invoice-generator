@@ -28,6 +28,16 @@ def generate_invoice_pdf(
 
     current_dir = os.path.dirname(os.path.abspath(__file__))
     project_root = os.path.abspath(os.path.join(current_dir, "..", ".."))
+    template_dir = os.path.join(project_root, "templates")
+    env = Environment(loader=FileSystemLoader(template_dir))
+    template = env.get_template("invoice.html")
+
+    rendered_html = template.render(
+        invoice=invoice_dict, firm=firm_dict, user_name=user_name
+    )
+
+    output_dir = "/tmp" if os.getenv("AWS_LAMBDA_FUNCTION_NAME") else project_root
+    output_path = os.path.join(output_dir, output_filename)
 
     # Keeping your existing template directory structure
     template_dir = os.path.join(project_root, "templates")
@@ -62,21 +72,3 @@ def generate_invoice_pdf(
         browser.close()
 
     print(f"📄 Modern CSS PDF generated at: {output_path}")
-
-
-if __name__ == "__main__":
-    # A quick mock test to ensure it runs locally if executed directly
-    test_invoice = {
-        "client": {"name": "Test Client"},
-        "services": [{"details": "Test Service", "amount": 1000, "qty": 1}],
-        "subtotal": 1000,
-        "gst": 180,
-        "total": 1180,
-    }
-    test_firm = {
-        "firm_name": "Test Firm LLC",
-        "logo_url": "https://via.placeholder.com/150",
-        "bank_name": "Test Bank",
-        "account_number": "123456789",
-    }
-    generate_invoice_pdf(test_invoice, test_firm, "playwright_test.pdf")
