@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { signIn, signUp } from "../lib/auth"; // 👈 Swap to our new Better Auth client
+import { signIn, signUp } from "./../lib/auth"; // 👈 Swap to our new Better Auth client
 import { Scale, Mail, Lock, Loader2, Eye, EyeOff, User } from "lucide-react";
 
 export default function LoginPage() {
