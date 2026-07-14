@@ -23,6 +23,10 @@ if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
 from intelligence.llm.llma_service import generate_json_for_invoice_from_prompt
+from src.document.invoice_storage import (
+    download_invoice_pdf,
+    upload_invoice_pdf,
+)
 from src.document.Pdf_generator import generate_invoice_pdf
 
 
@@ -382,6 +386,19 @@ async def prompt_to_invoice_generator(firm_id: str, response: PromptRequestModel
                 status_code=500, detail="PDF was not created successfully"
             )
 
+        invoice_id_for_storage = invoice_dict.get("invoice_number", "INV-UNKNOWN")
+        try:
+            storage_path = upload_invoice_pdf(
+                firm_id, invoice_id_for_storage, file_path
+            )
+            print(f"☁️  Invoice PDF persisted to storage: {storage_path}")
+        except Exception as e:
+            # Don't fail the whole request over this — the user still gets
+            # their PDF/email today, they just won't be able to "resend"
+            # this specific invoice later without regenerating it.
+            print(f"⚠️ Failed to upload invoice PDF to storage: {e}")
+            storage_path = output_filename
+
         if invoice_dict["client"].get("email"):
             target_email = invoice_dict["client"]["email"]
             client_name = invoice_dict["client"]["name"]
@@ -447,7 +464,7 @@ async def prompt_to_invoice_generator(firm_id: str, response: PromptRequestModel
                 "EARNING",
                 safe_total,
                 invoice_dict["client"]["name"],
-                output_filename,
+                storage_path,
                 detailed_description,
                 invoice_id,
             )
@@ -677,6 +694,146 @@ async def prompt_to_invoice_generator(firm_id: str, response: PromptRequestModel
                 content={
                     "status": "error",
                     "message": "Database error while updating the client.",
+                }
+            )
+
+    # --- RESEND INVOICE MODE ---
+    elif action == "resend_invoice":
+        invoice_id_to_resend = ai_json.get("invoice_id")
+        target_emails = ai_json.get("target_emails") or []
+
+        if not invoice_id_to_resend or not target_emails:
+            return JSONResponse(
+                content={
+                    "status": "error",
+                    "message": "I need both the invoice ID and at least one recipient email to resend an invoice.",
+                }
+            )
+
+        print(
+            f"🔁 Resend requested for invoice {invoice_id_to_resend} to {target_emails}"
+        )
+
+        try:
+            # asyncpg used
+            conn = await asyncpg.connect(DB_URL, statement_cache_size=0)
+
+            # asyncpg used
+            record = await conn.fetchrow(
+                """
+                SELECT reference_file, party_name
+                FROM firm_financials
+                WHERE firm_id = $1::uuid AND invoice_id = $2 AND transaction_type = 'EARNING'
+                """,
+                firm_id,
+                invoice_id_to_resend,
+            )
+
+            # asyncpg used
+            firm_data_record = await conn.fetchrow(
+                "SELECT * FROM firm_settings WHERE id = $1::uuid", firm_id
+            )
+            firm_data = dict(firm_data_record) if firm_data_record else {}
+
+            # asyncpg used
+            await conn.close()
+
+            if not record:
+                return JSONResponse(
+                    content={
+                        "status": "error",
+                        "message": f"I couldn't find an invoice with ID {invoice_id_to_resend} for this firm.",
+                    }
+                )
+
+            storage_path = record["reference_file"]
+            client_name = record["party_name"] or "Client"
+            sender_email = firm_data.get("email_sender")
+
+            if not storage_path:
+                return JSONResponse(
+                    content={
+                        "status": "error",
+                        "message": f"Invoice {invoice_id_to_resend} exists but has no stored PDF to resend — it may predate this feature.",
+                    }
+                )
+
+            output_dir = "/tmp" if os.getenv("AWS_LAMBDA_FUNCTION_NAME") else "."
+            local_pdf_path = os.path.join(
+                output_dir, f"resend_{invoice_id_to_resend}.pdf"
+            )
+
+            try:
+                download_invoice_pdf(storage_path, local_pdf_path)
+            except Exception as e:
+                print(f"⚠️ Failed to download invoice from storage: {e}")
+                return JSONResponse(
+                    content={
+                        "status": "error",
+                        "message": f"I found the invoice record but couldn't retrieve the stored PDF: {str(e)}",
+                    }
+                )
+
+            server_params = StdioServerParameters(
+                command="python", args=["src/intelligence/tools/email_mcp_service.py"]
+            )
+
+            sent_to = []
+            failed_to = []
+
+            try:
+                async with stdio_client(server_params) as (read, write):
+                    async with ClientSession(read, write) as session:
+                        await session.initialize()
+                        # One session, one tool call per recipient — avoids
+                        # spinning up a fresh subprocess per email.
+                        for recipient in target_emails:
+                            try:
+                                await session.call_tool(
+                                    "send_invoice_on_email",
+                                    arguments={
+                                        "target_email": recipient,
+                                        "pdf_file_path": local_pdf_path,
+                                        "client_name": client_name,
+                                        "sender_email": sender_email,
+                                    },
+                                )
+                                sent_to.append(recipient)
+                            except Exception as e:
+                                print(f"⚠️ Failed to send to {recipient}: {e}")
+                                failed_to.append(recipient)
+            except Exception as e:
+                print(f"⚠️ MCP Connection Failed: {e}")
+                return JSONResponse(
+                    content={
+                        "status": "error",
+                        "message": "Failed to connect to the email service.",
+                    }
+                )
+            finally:
+                if os.path.exists(local_pdf_path):
+                    os.remove(local_pdf_path)
+
+            if sent_to and not failed_to:
+                msg = f"Invoice {invoice_id_to_resend} was successfully resent to {', '.join(sent_to)}."
+            elif sent_to and failed_to:
+                msg = (
+                    f"Invoice {invoice_id_to_resend} was sent to {', '.join(sent_to)}, "
+                    f"but failed for {', '.join(failed_to)}."
+                )
+            else:
+                msg = f"Failed to resend invoice {invoice_id_to_resend} to anyone."
+
+            return JSONResponse(
+                content={"status": "success" if sent_to else "error", "message": msg}
+            )
+
+        except Exception as e:
+            print(f"⚠️ Database Error during resend: {e}")
+            return JSONResponse(
+                content={
+                    "status": "error",
+                    "message": "Database error while looking up the invoice to resend.",
                 }
             )
 
