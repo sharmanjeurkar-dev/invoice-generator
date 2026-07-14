@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
+from mangum import Mangum
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from pydantic import BaseModel
@@ -101,6 +102,7 @@ app.add_middleware(
 load_dotenv()
 DB_URL = os.getenv("DATABASE_URL")
 PDF_SEMAPHORE = asyncio.Semaphore(3)
+handler = Mangum(app=app)
 
 
 @app.get("/api/firms/{firm_id}/get-next-invoice-id")
