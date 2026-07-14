@@ -8,8 +8,12 @@ ENV PYTHONUNBUFFERED=1
 ENV PYTHONPATH=/app
 
 # --- Lambda-specific: only /tmp is writable at runtime ---
-# Playwright/Chromium need somewhere to write profile/cache data, and HOME
-# isn't writable inside Lambda's execution environment by default.
+# IMPORTANT: /tmp itself is wiped/remounted fresh by Lambda on every cold
+# start — nothing baked into /tmp during the Docker build survives into the
+# running container. So the Playwright browser binary must live OUTSIDE
+# /tmp (baked into the image, read-only at runtime is fine), while HOME
+# stays pointed at /tmp for Chromium's actual runtime scratch/profile data.
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
 ENV HOME=/tmp
 ENV XDG_CACHE_HOME=/tmp/.cache
 ENV XDG_CONFIG_HOME=/tmp/.config
@@ -36,9 +40,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 RUN pip install --no-cache-dir awslambdaric
 
 # Install Playwright's Chromium browser and its required OS-level dependencies
-# Baked into the image at build time — this directory is read-only at
-# runtime, which is fine, Chromium just needs the *binary* to be readable;
-# its writable scratch space comes from HOME=/tmp set above.
+# Installed to /opt/ms-playwright (per PLAYWRIGHT_BROWSERS_PATH above) — this
+# path is part of the image and persists at runtime, unlike /tmp.
 RUN playwright install chromium
 RUN playwright install-deps chromium
 

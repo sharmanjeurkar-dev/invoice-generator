@@ -22,6 +22,12 @@ const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
 const supabase = createClient(SUPABASE_URL as string, SUPABASE_ANON_KEY as string);
 
+// 👇 THE FIX: was hardcoded to http://127.0.0.1:8000 in both fetch calls
+// below. That works locally (your own machine IS 127.0.0.1:8000 in dev)
+// but in production, the *user's browser* tries to reach 127.0.0.1:8000 —
+// i.e. their own machine, not your Lambda — which always fails silently.
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+
 const ACCENT = "#1f3864";
 
 // --- Small building blocks ---------------------------------------------------
@@ -68,18 +74,18 @@ function Field({ label, name, value, onChange, placeholder, type = "text" }: any
 
 export default function SettingsPage() {
   const router = useRouter();
-  
+
   // 👇 Pull the dynamic firmId and loading state from Zustand
   const { firmId, isLoading: isFirmLoading } = useFirmStore();
 
   const [form, setForm] = useState({
     firm_name: "",
-    address_line1: "", 
-    address_line2: "", 
+    address_line1: "",
+    address_line2: "",
     bank_name: "",
     account_number: "",
     ifsc_code: "",
-    email_sender: "", 
+    email_sender: "",
     logo_url: "",
     pan_number: "",
     contact_number: "",
@@ -101,13 +107,12 @@ export default function SettingsPage() {
       if (!firmId) return; // Wait until we have the ID
 
       try {
-        // 👇 Fixed the template literal to use the dynamic ${firmId}
-        const res = await fetch(`http://127.0.0.1:8000/api/firms/${firmId}/settings`, { 
-          method: "GET" 
+        const res = await fetch(`${API_URL}/api/firms/${firmId}/settings`, {
+          method: "GET",
         });
-        
+
         if (!res.ok) throw new Error(`Failed to load settings (${res.status})`);
-        
+
         const data = await res.json();
         if (!cancelled && Object.keys(data).length > 0) {
           setForm((prev) => ({ ...prev, ...data }));
@@ -135,50 +140,50 @@ export default function SettingsPage() {
     setForm((prev) => ({ ...prev, [name]: value }));
   }, []);
 
-  const handleLogoUpload = useCallback(async (e: any) => {
-    const file = e.target.files?.[0];
-    if (!file || !firmId) return; // Safety check for the file and the firmId
+  const handleLogoUpload = useCallback(
+    async (e: any) => {
+      const file = e.target.files?.[0];
+      if (!file || !firmId) return; // Safety check for the file and the firmId
 
-    setUploading(true);
-    setErrorMsg("");
+      setUploading(true);
+      setErrorMsg("");
 
-    try {
-      
-      if (form.logo_url) {
-        // Grab just the filename from the very end of the Supabase public URL
-        const oldFileName = form.logo_url.split("/").pop();
-        
-        if (oldFileName) {
-          // Tell Supabase to permanently delete this specific file from the bucket
-          await supabase.storage.from("Logos").remove([oldFileName]);
+      try {
+        if (form.logo_url) {
+          // Grab just the filename from the very end of the Supabase public URL
+          const oldFileName = form.logo_url.split("/").pop();
+
+          if (oldFileName) {
+            // Tell Supabase to permanently delete this specific file from the bucket
+            await supabase.storage.from("Logos").remove([oldFileName]);
+          }
         }
+
+        // 👇 2. UPLOAD THE NEW LOGO
+        const fileExt = file.name.split(".").pop();
+        // Bonus: Add the firmId to the filename so your bucket stays highly organized!
+        const fileName = `firm-${firmId}-${Date.now()}.${fileExt}`;
+
+        const { error: uploadError } = await supabase.storage
+          .from("Logos")
+          .upload(fileName, file, {
+            upsert: true, // Ensures it overwrites gracefully
+          });
+
+        if (uploadError) throw uploadError;
+
+        const { data: publicUrlData } = supabase.storage.from("Logos").getPublicUrl(fileName);
+
+        setForm((prev) => ({ ...prev, logo_url: publicUrlData.publicUrl }));
+      } catch (err) {
+        console.error("SUPABASE UPLOAD ERROR:", err);
+        setErrorMsg("Logo upload failed. Please ensure your Supabase storage bucket is public.");
+      } finally {
+        setUploading(false);
       }
-
-      // 👇 2. UPLOAD THE NEW LOGO
-      const fileExt = file.name.split(".").pop();
-      // Bonus: Add the firmId to the filename so your bucket stays highly organized!
-      const fileName = `firm-${firmId}-${Date.now()}.${fileExt}`;
-
-      const { error: uploadError } = await supabase.storage
-        .from("Logos")
-        .upload(fileName, file, {
-          upsert: true // Ensures it overwrites gracefully
-        });
-
-      if (uploadError) throw uploadError;
-
-      const { data: publicUrlData } = supabase.storage
-        .from("Logos")
-        .getPublicUrl(fileName);
-
-      setForm((prev) => ({ ...prev, logo_url: publicUrlData.publicUrl }));
-    } catch (err) {
-      console.error("SUPABASE UPLOAD ERROR:", err);
-      setErrorMsg("Logo upload failed. Please ensure your Supabase storage bucket is public.");
-    } finally {
-      setUploading(false);
-    }
-  }, [form.logo_url, firmId]); 
+    },
+    [form.logo_url, firmId]
+  );
 
   const handleSave = useCallback(async () => {
     if (!firmId) {
@@ -190,7 +195,7 @@ export default function SettingsPage() {
     setErrorMsg("");
 
     try {
-      const res = await fetch(`http://127.0.0.1:8000/api/firms/${firmId}/settings`, {
+      const res = await fetch(`${API_URL}/api/firms/${firmId}/settings`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(form),
@@ -199,12 +204,11 @@ export default function SettingsPage() {
       if (!res.ok) throw new Error(`Save failed (${res.status})`);
 
       setShowSuccess(true);
-      
+
       // 👇 Wait 1 second to show success message, then redirect to /agent
       setTimeout(() => {
         router.push("/agent");
       }, 1000);
-
     } catch (err) {
       setErrorMsg("Could not save settings. Please check your connection and try again.");
     } finally {
@@ -229,9 +233,7 @@ export default function SettingsPage() {
       <div className="w-full max-w-3xl">
         {/* Page heading */}
         <div className="mb-6 px-1">
-          <h1 className="text-[22px] font-semibold text-[#1a1a1a]">
-            Firm Settings & Setup
-          </h1>
+          <h1 className="text-[22px] font-semibold text-[#1a1a1a]">Firm Settings & Setup</h1>
           <p className="text-[14px] text-[#6b7280] mt-1">
             These details are used to generate your firm's invoices. Keep them accurate and up to date.
           </p>
@@ -277,7 +279,7 @@ export default function SettingsPage() {
                     placeholder="MG Road, Bengaluru 560001"
                   />
                 </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <Field
                     label="Contact Email"
                     name="contact_email"
@@ -301,7 +303,6 @@ export default function SettingsPage() {
                   onChange={handleChange}
                   placeholder="ABCDE1234F"
                 />
-
               </div>
             </section>
 
