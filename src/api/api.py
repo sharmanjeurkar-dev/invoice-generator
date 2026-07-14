@@ -476,14 +476,6 @@ async def prompt_to_invoice_generator(firm_id: str, response: PromptRequestModel
         # asyncpg used
         await conn.close()
 
-        client_email = invoice_dict["client"].get("email")
-        if client_email:
-            if os.path.exists(file_path):
-                os.remove(file_path)
-            return {
-                "status": "success",
-                "message": f"Invoice {invoice_id} successfully finalized and emailed to {client_email}.",
-            }
         return FileResponse(
             path=file_path,
             filename=output_filename,
