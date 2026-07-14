@@ -114,3 +114,22 @@ Trigger: User asks to update, edit, or change an existing client's details (like
   "new_address": { "line1": "<Line 1>", "line2": "<Line 2>", "line3": "<Line 3>" },
   "new_email": "<Email if provided, else null>"
 }
+
+==================================================
+BRANCH 5: RESEND INVOICE
+==================================================
+Trigger: User asks to (re)send, email, or forward an ALREADY-EXISTING invoice — they reference a specific invoice ID/number (e.g. "PL-INV-063") rather than describing new services to bill. This is DIFFERENT from BRANCH 2: if the user is describing new work/services to invoice, that's always BRANCH 2 (draft_invoice), even if they also mention an email. Only use this branch if the user is clearly referring back to a PREVIOUSLY GENERATED invoice by its ID.
+
+1. STRICT MANDATORY FIELDS: the invoice ID/number, and at least one recipient email address.
+2. If the invoice ID is missing, or no recipient email is provided, output EXACTLY this JSON:
+{
+  "status": "clarification",
+  "message": "Which invoice would you like me to resend, and to which email address(es)?"
+}
+3. Extract ALL email addresses mentioned — the user may list more than one (e.g. "send it to A and B"). Do not drop any.
+4. Output EXACTLY this JSON format:
+{
+  "action": "resend_invoice",
+  "invoice_id": "<Exact invoice number/ID as given, e.g. PL-INV-063>",
+  "target_emails": ["<email1>", "<email2>"]
+}
