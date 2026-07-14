@@ -113,7 +113,7 @@ handler = Mangum(app=app)
 async def get_next_invoice_id(firm_id: str):
     try:
         # asyncpg used
-        conn = await asyncpg.connect(DB_URL, statement_cache_size=0)
+        conn = await asyncpg.connect(DB_URL)
         # asyncpg used
         result = await conn.fetchrow(
             """
@@ -423,7 +423,23 @@ async def prompt_to_invoice_generator(firm_id: str, response: PromptRequestModel
                                 "sender_email": sender_email,
                             },
                         )
-                        email_status_msg = target_email
+                        # 👇 THE FIX: previously we set email_status_msg
+                        # unconditionally right after the call completed,
+                        # regardless of what the tool actually reported. The
+                        # tool returns an "Error: ..." STRING on failure
+                        # rather than raising — so a completed call is NOT
+                        # the same as a successful send. Check the content.
+                        result_text = "".join(
+                            block.text
+                            for block in result.content
+                            if hasattr(block, "text")
+                        )
+                        print(f"📧 MCP tool result: {result_text}")
+
+                        if result_text.startswith("Success"):
+                            email_status_msg = target_email
+                        else:
+                            print(f"⚠️ Email send failed: {result_text}")
             except Exception as e:
                 print(f"⚠️ MCP Connection Failed: {e}")
 
@@ -476,6 +492,14 @@ async def prompt_to_invoice_generator(firm_id: str, response: PromptRequestModel
         # asyncpg used
         await conn.close()
 
+        client_email = invoice_dict["client"].get("email")
+        if client_email:
+            if os.path.exists(file_path):
+                os.remove(file_path)
+            return {
+                "status": "success",
+                "message": f"Invoice {invoice_id} successfully finalized and emailed to {client_email}.",
+            }
         return FileResponse(
             path=file_path,
             filename=output_filename,
@@ -781,7 +805,7 @@ async def prompt_to_invoice_generator(firm_id: str, response: PromptRequestModel
                         # spinning up a fresh subprocess per email.
                         for recipient in target_emails:
                             try:
-                                await session.call_tool(
+                                result = await session.call_tool(
                                     "send_invoice_on_email",
                                     arguments={
                                         "target_email": recipient,
@@ -790,7 +814,22 @@ async def prompt_to_invoice_generator(firm_id: str, response: PromptRequestModel
                                         "sender_email": sender_email,
                                     },
                                 )
-                                sent_to.append(recipient)
+                                result_text = "".join(
+                                    block.text
+                                    for block in result.content
+                                    if hasattr(block, "text")
+                                )
+                                print(
+                                    f"📧 MCP tool result for {recipient}: {result_text}"
+                                )
+
+                                if result_text.startswith("Success"):
+                                    sent_to.append(recipient)
+                                else:
+                                    print(
+                                        f"⚠️ Email send failed for {recipient}: {result_text}"
+                                    )
+                                    failed_to.append(recipient)
                             except Exception as e:
                                 print(f"⚠️ Failed to send to {recipient}: {e}")
                                 failed_to.append(recipient)
