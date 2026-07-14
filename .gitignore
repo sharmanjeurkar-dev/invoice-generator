@@ -10,3 +10,4 @@ src/ui/.next/
 src/api/__pycache__/
 /tests/__pycache__/
 /intelligence/llm/__pycache__/
+temp.txt
