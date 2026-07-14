@@ -113,7 +113,7 @@ handler = Mangum(app=app)
 async def get_next_invoice_id(firm_id: str):
     try:
         # asyncpg used
-        conn = await asyncpg.connect(DB_URL)
+        conn = await asyncpg.connect(DB_URL, statement_cache_size=0)
         # asyncpg used
         result = await conn.fetchrow(
             """
