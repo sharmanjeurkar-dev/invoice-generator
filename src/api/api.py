@@ -406,8 +406,15 @@ async def prompt_to_invoice_generator(firm_id: str, response: PromptRequestModel
             # 👇 1. Extract the sender's email from the firm_data you fetched earlier
             sender_email = firm_data.get("email_sender")
 
+            # 👇 THE FIX: explicitly pass the parent environment. Relying on
+            # implicit inheritance was likely the actual cause of emails
+            # silently using wrong/missing credentials in Lambda — local
+            # subprocess spawning and Lambda's execution environment don't
+            # always behave identically here.
             server_params = StdioServerParameters(
-                command="python", args=["src/intelligence/tools/email_mcp_service.py"]
+                command="python",
+                args=["src/intelligence/tools/email_mcp_service.py"],
+                env=dict(os.environ),
             )
 
             try:
@@ -791,7 +798,9 @@ async def prompt_to_invoice_generator(firm_id: str, response: PromptRequestModel
                 )
 
             server_params = StdioServerParameters(
-                command="python", args=["src/intelligence/tools/email_mcp_service.py"]
+                command="python",
+                args=["src/intelligence/tools/email_mcp_service.py"],
+                env=dict(os.environ),
             )
 
             sent_to = []

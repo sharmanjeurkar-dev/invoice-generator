@@ -1,5 +1,6 @@
 import os
 import smtplib
+import sys
 from email.message import EmailMessage
 
 from dotenv import load_dotenv
@@ -16,6 +17,18 @@ def send_invoice_on_email(
 ) -> str:
     # sender_email = os.getenv("SENDER_EMAIL")
     app_password = os.getenv("APP_PASSWORD")
+
+    # 👇 TEMPORARY DIAGNOSTIC — written to stderr, not stdout, so it doesn't
+    # corrupt the MCP JSON-RPC protocol (which uses stdout for messages).
+    # Never print the actual password — just whether it's present and its
+    # length, enough to confirm env passthrough without leaking the secret.
+    # Remove this once emails are confirmed working again.
+    print(
+        f"🔍 DEBUG (stderr): sender_email={sender_email!r}, "
+        f"app_password_present={bool(app_password)}, "
+        f"app_password_len={len(app_password) if app_password else 0}",
+        file=sys.stderr,
+    )
 
     if not os.path.exists(pdf_file_path):
         return "ERROR FILE NOT FOUND"
@@ -35,7 +48,10 @@ def send_invoice_on_email(
             msg.add_attachment(
                 pdf_data, maintype="application", subtype="pdf", filename=pdf_name
             )
-            print(f"📧 [MCP Server] Executing SMTP transfer to {target_email}...")
+            print(
+                f"📧 [MCP Server] Executing SMTP transfer to {target_email}...",
+                file=sys.stderr,
+            )
 
             with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
                 smtp.login(user=sender_email, password=app_password)
