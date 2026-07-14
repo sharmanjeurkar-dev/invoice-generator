@@ -44,7 +44,7 @@ def generate_invoice_pdf(
 
     print("🌐 Spinning up headless browser...")
     with sync_playwright() as p:
-        browser = p.chromium.launch()
+        browser = p.chromium.launch(args=["--no-sandbox", "--disable-dev-shm-usage"])
         page = browser.new_page()
 
         # Playwright renders the injected HTML string
