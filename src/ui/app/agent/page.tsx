@@ -506,15 +506,34 @@ const [user_name, setUserName] = useState("User");
                                   </LineChart>
                                 ) : (
                                   <PieChart>
-                                    <Pie data={chart.data} cx="50%" cy="50%" innerRadius={70} outerRadius={90} paddingAngle={4} dataKey="value" nameKey="name">
+                                    <Pie 
+                                      data={chart.data} 
+                                      cx="50%" 
+                                      cy="50%" 
+                                      innerRadius={70} 
+                                      outerRadius={90} 
+                                      paddingAngle={4} 
+                                      dataKey="value" 
+                                      nameKey="name"
+                                    >
                                       {chart.data.map((entry: any, i: number) => (
-                                        <Cell key={`cell-${i}`} fill={COLORS[i % COLORS.length]} />
+                                        <Cell 
+                                          key={`cell-${i}`} 
+                                          fill={COLORS[i % COLORS.length]} 
+                                          name={entry.name} 
+                                        />
                                       ))}
                                     </Pie>
-                                    <Tooltip 
-                                    contentStyle={{ borderRadius: '8px', border: '1px solid #e5e7eb', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', fontSize: '13px' }} 
-                                    formatter={(v: any) => `₹${Number(v).toLocaleString()}`} 
-                                  />
+                                      <Tooltip 
+                                        contentStyle={{ 
+                                          borderRadius: '8px', 
+                                          border: '1px solid #e5e7eb', 
+                                          boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', 
+                                          fontSize: '13px' 
+                                        }} 
+                                      
+                                      formatter={(v: any, name: any) => [`₹${Number(v).toLocaleString()}`, name]} 
+                                    />
                                     <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '15px' }} />
                                   </PieChart>
                                 )}
