@@ -109,6 +109,27 @@ PDF_SEMAPHORE = asyncio.Semaphore(3)
 handler = Mangum(app=app)
 
 
+@app.post("/api/firms/{firm_id}/users/{target_user_id}/approve")
+async def approve_user(firm_id: str, target_user_id: str):
+    try:
+        if firm_id and target_user_id:
+            conn = await asyncpg.connect(DB_URL)
+            update = conn.fetchrow(
+                "UPDATE PROFILES"
+                "SET status = 'approved'"
+                "WHERE firm_id = %s AND user_id = %s",
+                (firm_id, target_user_id),
+            )
+
+        if update:
+            print("User approved")
+            return {"status": "success", "message": "User approved"}
+        else:
+            print("User couldnt be updated")
+    except Exception as e:
+        return {"error": str(e)}
+
+
 @app.get("/api/firms/{firm_id}/get-next-invoice-id")
 async def get_next_invoice_id(firm_id: str):
     try:
