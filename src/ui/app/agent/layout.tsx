@@ -1,5 +1,5 @@
-// Inside app/agent/layout.tsx (Brand new file!)
 import { Metadata } from "next";
+import AuthGuard from "@/components/AuthGuard";
 
 export const metadata: Metadata = {
   title: "Ledger",
@@ -7,5 +7,9 @@ export const metadata: Metadata = {
 
 // Only ONE export default here!
 export default function AgentLayout({ children }: { children: React.ReactNode }) {
-  return <>{children}</>;
+  return (
+    <AuthGuard>
+      {children}
+    </AuthGuard>
+  );
 }

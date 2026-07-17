@@ -2,7 +2,7 @@
 
 import React, { useState } from "react";
 import { useRouter } from "next/navigation";
-import { supabase } from "@/lib/supabaseClient";
+import { supabase } from "../lib/supabaseClient";
 import { Clock, LogOut, RefreshCw } from "lucide-react";
 
 export default function PendingPage() {

@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import { useFirmStore } from "../../store/useFirmStore";
-import MfaModal from "../../componant/MFAmodel";
+import MfaModal from "../../components/MFAmodel";
 import { ShieldCheck, UserCheck, Clock, Loader2 } from "lucide-react";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
