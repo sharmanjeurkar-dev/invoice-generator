@@ -130,6 +130,26 @@ async def approve_user(firm_id: str, target_user_id: str):
         return {"error": str(e)}
 
 
+@app.get("/api/firms/{firm_id}/team")
+async def get_users(firm_id: str):
+    try:
+        if firm_id:
+            print("Opened firm admin dashboard and loading all the users")
+            conn = await asyncpg.connect(DB_URL)
+            users_pending = await conn.fetch(
+                "SELECT id, full_name, email, role, status FROM profiles WHERE firm_id = $1::uuid",
+                firm_id,
+            )
+            conn.close()
+            if users_pending:
+                return [dict(row) for row in users_pending]
+        return []
+
+    except Exception as e:
+        print(f"Error couldnt load users: {e}")
+        return []
+
+
 @app.get("/api/firms/{firm_id}/get-next-invoice-id")
 async def get_next_invoice_id(firm_id: str):
     try:
