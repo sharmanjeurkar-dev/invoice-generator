@@ -83,7 +83,7 @@ export default function LoginPage() {
       >
         <div className="mb-7">
           <h2 className="text-[22px] font-semibold tracking-tight mb-1.5" style={{ color: "#1A1A1A" }}>
-            {isLogin ? "Welcome back" : "Register your firm"}
+            {isLogin ? "Welcome" : "Register your firm"}
           </h2>
           <p className="text-[13.5px]" style={{ color: "#6B7280" }}>
             {isLogin
