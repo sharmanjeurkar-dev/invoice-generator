@@ -114,14 +114,14 @@ async def approve_user(firm_id: str, target_user_id: str):
     try:
         if firm_id and target_user_id:
             conn = await asyncpg.connect(DB_URL)
-            update = conn.fetchrow(
+            update = await conn.fetchrow(
                 "UPDATE PROFILES"
                 "SET status = 'approved'"
                 "WHERE firm_id = %s AND user_id = %s",
                 (firm_id, target_user_id),
             )
 
-        if update:
+        if update["status"] == "approved":
             print("User approved")
             return {"status": "success", "message": "User approved"}
         else:
