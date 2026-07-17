@@ -1,0 +1,30 @@
+name: CI/CD Pipeline
+on:
+  push:
+    branches: [main]
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ap-south-1
+          
+      - name: Build and push image
+        run: |
+          docker buildx build --platform linux/amd64 --provenance=false -t ledger-api --load .
+          docker tag ledger-api:latest 354102625536.dkr.ecr.ap-south-1.amazonaws.com/ledger.ai-api:latest
+          aws ecr get-login-password --region ap-south-1 | docker login --username AWS --password-stdin 354102625536.dkr.ecr.ap-south-1.amazonaws.com
+          docker push 354102625536.dkr.ecr.ap-south-1.amazonaws.com/ledger.ai-api:latest
+          
+      - name: Update Lambda function
+        run: |
+          aws lambda update-function-code --function-name ledger-api --image-uri 354102625536.dkr.ecr.ap-south-1.amazonaws.com/ledger.ai-api:latest
+          aws lambda wait function-updated --function-name ledger-api
