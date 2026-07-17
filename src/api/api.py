@@ -115,17 +115,19 @@ async def approve_user(firm_id: str, target_user_id: str):
         if firm_id and target_user_id:
             conn = await asyncpg.connect(DB_URL)
             update = await conn.fetchrow(
-                "UPDATE PROFILES"
-                "SET status = 'approved'"
-                "WHERE firm_id = %s AND user_id = %s",
+                "UPDATE profiles "
+                "SET status = 'approved' "
+                "WHERE firm_id = $1::uuid AND id = $2::uuid "
+                "RETURNING status;",
                 (firm_id, target_user_id),
             )
 
-        if update["status"] == "approved":
-            print("User approved")
+        if update and update["status"] == "approved":
+            print(f"✅ User {target_user_id} approved")
             return {"status": "success", "message": "User approved"}
         else:
-            print("User couldnt be updated")
+            print("⚠️ User couldn't be updated (IDs might not match)")
+            return {"status": "error", "message": "Could not update user."}
     except Exception as e:
         return {"error": str(e)}
 
@@ -140,7 +142,7 @@ async def get_users(firm_id: str):
                 "SELECT id, full_name, email, role, status FROM profiles WHERE firm_id = $1::uuid",
                 firm_id,
             )
-            conn.close()
+            await conn.close()
             if users_pending:
                 return [dict(row) for row in users_pending]
         return []
