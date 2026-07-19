@@ -113,15 +113,16 @@ handler = Mangum(app=app)
 async def approve_user(firm_id: str, target_user_id: str):
     try:
         if firm_id and target_user_id:
-            conn = await asyncpg.connect(DB_URL)
+            conn = await asyncpg.connect(DB_URL, statement_cache_size=0)
             update = await conn.fetchrow(
                 "UPDATE profiles "
                 "SET status = 'approved' "
                 "WHERE firm_id = $1::uuid AND id = $2::uuid "
                 "RETURNING status;",
-                (firm_id, target_user_id),
+                firm_id,
+                target_user_id,
             )
-
+        await conn.close()
         if update and update["status"] == "approved":
             print(f"✅ User {target_user_id} approved")
             return {"status": "success", "message": "User approved"}
@@ -137,7 +138,7 @@ async def get_users(firm_id: str):
     try:
         if firm_id:
             print("Opened firm admin dashboard and loading all the users")
-            conn = await asyncpg.connect(DB_URL)
+            conn = await asyncpg.connect(DB_URL, statement_cache_size=0)
             users_pending = await conn.fetch(
                 "SELECT id, full_name, email, role, status FROM profiles WHERE firm_id = $1::uuid",
                 firm_id,
