@@ -309,6 +309,7 @@ async def prompt_to_invoice_generator(firm_id: str, response: PromptRequestModel
             )
 
         client_name = client_data.get("name")
+        client_email = client_data.get("email")
         line1 = address.get("line1", "")
         line2 = address.get("line2", "")
         line3 = address.get("line3", "")
@@ -321,8 +322,8 @@ async def prompt_to_invoice_generator(firm_id: str, response: PromptRequestModel
                 inserted_row = await conn.fetchrow(
                     """
                     INSERT INTO clients 
-                    (firm_id, created_by, name, address_line1, address_line2, address_line3) 
-                    VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6)
+                    (firm_id, created_by, name, address_line1, address_line2, address_line3,email) 
+                    VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6. $7)
                     ON CONFLICT DO NOTHING
                     RETURNING name;
                     """,
@@ -332,6 +333,7 @@ async def prompt_to_invoice_generator(firm_id: str, response: PromptRequestModel
                     line1,
                     line2,
                     line3,
+                    client_email,
                 )
 
                 if inserted_row:
@@ -443,56 +445,48 @@ async def prompt_to_invoice_generator(firm_id: str, response: PromptRequestModel
             print(f"⚠️ Failed to upload invoice PDF to storage: {e}")
             storage_path = output_filename
 
-        if invoice_dict["client"].get("email"):
+        conn = await asyncpg.connect(DB_URL, statement_cache_size=0)
+        fetch_email = await conn.fetchrow(
+            "SELECT emial form clients where name = 1$", client_name
+        )
+        if fetch_email is not None:
+            target_email = fetch_email
+
+        elif invoice_dict["client"].get("email"):
             target_email = invoice_dict["client"]["email"]
-            client_name = invoice_dict["client"]["name"]
+        client_name = invoice_dict["client"]["name"]
+        sender_email = firm_data.get("email_sender")
 
-            # 👇 1. Extract the sender's email from the firm_data you fetched earlier
-            sender_email = firm_data.get("email_sender")
+        server_params = StdioServerParameters(
+            command="python",
+            args=["src/intelligence/tools/email_mcp_service.py"],
+            env=dict(os.environ),
+        )
 
-            # 👇 THE FIX: explicitly pass the parent environment. Relying on
-            # implicit inheritance was likely the actual cause of emails
-            # silently using wrong/missing credentials in Lambda — local
-            # subprocess spawning and Lambda's execution environment don't
-            # always behave identically here.
-            server_params = StdioServerParameters(
-                command="python",
-                args=["src/intelligence/tools/email_mcp_service.py"],
-                env=dict(os.environ),
-            )
+        try:
+            async with stdio_client(server_params) as (read, write):
+                async with ClientSession(read, write) as session:
+                    await session.initialize()
+                    result = await session.call_tool(
+                        "send_invoice_on_email",
+                        arguments={
+                            "target_email": target_email,
+                            "pdf_file_path": file_path,
+                            "client_name": client_name,
+                            "sender_email": sender_email,
+                        },
+                    )
+                    result_text = "".join(
+                        block.text for block in result.content if hasattr(block, "text")
+                    )
+                    print(f"📧 MCP tool result: {result_text}")
 
-            try:
-                async with stdio_client(server_params) as (read, write):
-                    async with ClientSession(read, write) as session:
-                        await session.initialize()
-                        result = await session.call_tool(
-                            "send_invoice_on_email",
-                            arguments={
-                                "target_email": target_email,
-                                "pdf_file_path": file_path,
-                                "client_name": client_name,
-                                "sender_email": sender_email,
-                            },
-                        )
-                        # 👇 THE FIX: previously we set email_status_msg
-                        # unconditionally right after the call completed,
-                        # regardless of what the tool actually reported. The
-                        # tool returns an "Error: ..." STRING on failure
-                        # rather than raising — so a completed call is NOT
-                        # the same as a successful send. Check the content.
-                        result_text = "".join(
-                            block.text
-                            for block in result.content
-                            if hasattr(block, "text")
-                        )
-                        print(f"📧 MCP tool result: {result_text}")
-
-                        if result_text.startswith("Success"):
-                            email_status_msg = target_email
-                        else:
-                            print(f"⚠️ Email send failed: {result_text}")
-            except Exception as e:
-                print(f"⚠️ MCP Connection Failed: {e}")
+                    if result_text.startswith("Success"):
+                        email_status_msg = target_email
+                    else:
+                        print(f"⚠️ Email send failed: {result_text}")
+        except Exception as e:
+            print(f"⚠️ MCP Connection Failed: {e}")
 
         header = {}
         if email_status_msg:
